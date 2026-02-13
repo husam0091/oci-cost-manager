@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+*.log
+
+# Virtual environments
+venv/
+.venv/
+src/backend/venv/
+
+# Runtime/data artifacts
+*.db
+*.sqlite
+*.sqlite3
+backend.log
+frontend.log
+src/backend/cache/
+tmp/
+artifacts/
+reports/
+exports/
+
+# Frontend
+src/frontend/node_modules/
+src/frontend/dist/
+node_modules/
+dist/
+build/
+*.local
+
+# Env files
+.env
+*.env.local
+src/backend/.env
+
+# OCI secrets
+.oci/
+*.pem
+*.key
+oci_api_key.pem
+
+# Docker volumes / local data
+**/pgdata/
+**/data/
+**/volumes/
+docker-compose.override.yml

@@ -1,0 +1,124 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oci-cost-manager-postgres
+    environment:
+      POSTGRES_DB: ocicost
+      POSTGRES_USER: ocicost_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_strong}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ocicost_user -d ocicost"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - app_internal
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.1-p0
+    container_name: oci-cost-manager-pgbouncer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ocicost
+      DB_USER: ocicost_user
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-change_me_strong}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 50
+      RESERVE_POOL_SIZE: 25
+      SERVER_RESET_QUERY: DISCARD ALL
+    ports:
+      - "6432:5432"
+    networks:
+      - app_internal
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.2-alpine
+    container_name: oci-cost-manager-redis
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    networks:
+      - app_internal
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile
+    container_name: oci-cost-manager-backend
+    expose:
+      - "8000"
+    environment:
+      DEBUG: "false"
+      APP_NAME: "OCI Cost Manager"
+      APP_VERSION: "1.0.0"
+      API_PREFIX: "/api/v1"
+      DATABASE_URL: "postgresql+psycopg://ocicost_user:${POSTGRES_PASSWORD:-change_me_strong}@pgbouncer:5432/ocicost"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/1"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/2"
+      OCI_CONFIG_FILE: "/home/app/.oci/config"
+      OCI_CONFIG_PROFILE: "DEFAULT"
+      OCI_PRICE_API_URL: "https://apexapps.oracle.com/pls/apex/cetools/api/v1/products/"
+      CACHE_TTL_COMPARTMENTS: "3600"
+      CACHE_TTL_RESOURCES: "900"
+      CACHE_TTL_PRICES: "86400"
+      CORS_ORIGINS: '["http://localhost:8080","http://localhost:3000","http://localhost:5173"]'
+      EXPORT_DIR: "/exports"
+    volumes:
+      - ${OCI_CONFIG_DIR:-C:/Users/hosam/.oci}:/home/app/.oci:ro
+      - ../y/reports:/exports
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_started
+    networks:
+      - app_internal
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile
+    container_name: oci-cost-manager-worker
+    command: ["bash", "-lc", "celery -A worker.celery_app worker -Q default,heavy -l INFO"]
+    environment:
+      DATABASE_URL: "postgresql+psycopg://ocicost_user:${POSTGRES_PASSWORD:-change_me_strong}@pgbouncer:5432/ocicost"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/1"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/2"
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - app_internal
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+    container_name: oci-cost-manager-frontend
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+    networks:
+      - app_internal
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+networks:
+  app_internal:
+    driver: bridge
