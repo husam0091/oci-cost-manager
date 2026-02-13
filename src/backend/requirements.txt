@@ -1,0 +1,45 @@
+# FastAPI and server
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+python-multipart==0.0.9
+
+# Database
+sqlalchemy==2.0.25
+alembic==1.13.1
+psycopg[binary]==3.2.1
+
+# OCI SDK
+oci==2.121.0
+
+# HTTP client for price API
+httpx==0.26.0
+
+# Data validation
+pydantic==2.6.1
+pydantic-settings==2.1.0
+
+# Export functionality
+openpyxl==3.1.2
+reportlab==4.1.0
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2024.1
+
+# Testing
+pytest>=7.0.0,<8.0.0
+pytest-asyncio==0.23.4
+
+# Code quality
+black==24.1.1
+ruff==0.2.1
+
+# Scheduler & Auth
+apscheduler==3.10.4
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+
+# Worker + Cache
+celery==5.6.0
+redis==5.0.7
