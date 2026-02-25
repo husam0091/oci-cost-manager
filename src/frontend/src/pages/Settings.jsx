@@ -14,12 +14,14 @@ import {
   adminUpdateSettings,
   adminRunScan,
   adminGetScanRuns,
-  adminTestOciConnection,
   adminGetImportantCompartments,
   adminGetFeatureFlags,
   adminSetImportantCompartments,
   adminUpdateFeatureFlags,
   getDataCompartmentTree,
+  saveOciSettings,
+  uploadOciKey,
+  testOciSettings,
 } from '../services/api';
 
 function Settings({ onAuthChange, forceLogin = false }) {
@@ -37,16 +39,15 @@ function Settings({ onAuthChange, forceLogin = false }) {
   const [scanInterval, setScanInterval] = useState(8);
   const [saveMessage, setSaveMessage] = useState(null);
 
-  const [ociAuthMode, setOciAuthMode] = useState('profile');
-  const [ociConfigProfile, setOciConfigProfile] = useState('DEFAULT');
-  const [ociConfigFile, setOciConfigFile] = useState('/root/.oci/config');
   const [ociUser, setOciUser] = useState('');
   const [ociFingerprint, setOciFingerprint] = useState('');
   const [ociTenancy, setOciTenancy] = useState('');
   const [ociRegion, setOciRegion] = useState('');
-  const [ociKeyFile, setOciKeyFile] = useState('/root/.oci/oci_api_key.pem');
-  const [ociKeyContent, setOciKeyContent] = useState('');
-  const [ociPassPhrase, setOciPassPhrase] = useState('');
+  const [ociLastTestStatus, setOciLastTestStatus] = useState(null);
+  const [ociLastTestedAt, setOciLastTestedAt] = useState(null);
+  const [selectedKeyFile, setSelectedKeyFile] = useState(null);
+  const [uploadingKey, setUploadingKey] = useState(false);
+  const [showAdvancedPem, setShowAdvancedPem] = useState(false);
 
   const [scanRuns, setScanRuns] = useState([]);
   const [scanRunning, setScanRunning] = useState(false);
@@ -92,16 +93,12 @@ function Settings({ onAuthChange, forceLogin = false }) {
         setSettings(data);
         setNewUsername(data.username || '');
         setScanInterval(data.scan_interval_hours || 8);
-        setOciAuthMode(data.oci_auth_mode || 'profile');
-        setOciConfigProfile(data.oci_config_profile || 'DEFAULT');
-        setOciConfigFile(data.oci_config_file || '/root/.oci/config');
         setOciUser(data.oci_user || '');
         setOciFingerprint(data.oci_fingerprint || '');
         setOciTenancy(data.oci_tenancy || '');
         setOciRegion(data.oci_region || '');
-        setOciKeyFile(data.oci_key_file || '/root/.oci/oci_api_key.pem');
-        setOciKeyContent(data.oci_key_content || '');
-        setOciPassPhrase(data.oci_pass_phrase || '');
+        setOciLastTestStatus(data.oci_last_test_status || null);
+        setOciLastTestedAt(data.oci_last_tested_at || null);
         setNotificationsEmailEnabled(Boolean(data.notifications_email_enabled));
         setNotificationsSmtpHost(data.notifications_smtp_host || '');
         setNotificationsSmtpPort(Number(data.notifications_smtp_port || 587));
@@ -184,16 +181,6 @@ function Settings({ onAuthChange, forceLogin = false }) {
   };
 
   const buildIntegrationPayload = () => ({
-    oci_auth_mode: ociAuthMode,
-    oci_config_profile: ociConfigProfile,
-    oci_config_file: ociConfigFile,
-    oci_user: ociUser,
-    oci_fingerprint: ociFingerprint,
-    oci_tenancy: ociTenancy,
-    oci_region: ociRegion,
-    oci_key_file: ociKeyFile,
-    oci_key_content: ociKeyContent,
-    oci_pass_phrase: ociPassPhrase,
     notifications_email_enabled: notificationsEmailEnabled,
     notifications_smtp_host: notificationsSmtpHost,
     notifications_smtp_port: notificationsSmtpPort,
@@ -242,6 +229,12 @@ function Settings({ onAuthChange, forceLogin = false }) {
     setSaveMessage(null);
     try {
       const payload = buildIntegrationPayload();
+      await saveOciSettings({
+        user_ocid: ociUser,
+        tenancy_ocid: ociTenancy,
+        fingerprint: ociFingerprint,
+        region: ociRegion,
+      });
       if (newUsername && newUsername !== settings?.username) payload.username = newUsername;
       if (newPassword) payload.password = newPassword;
       if (scanInterval !== settings?.scan_interval_hours) payload.scan_interval_hours = scanInterval;
@@ -261,13 +254,30 @@ function Settings({ onAuthChange, forceLogin = false }) {
     setTestingConnection(true);
     setOciTestStatus(null);
     try {
-      const res = await adminTestOciConnection(buildIntegrationPayload());
+      const res = await testOciSettings();
       const data = res.data?.data || {};
       setOciTestStatus({ type: 'success', text: `Connected to ${data.tenancy_name || 'tenancy'} in ${data.region || 'region'}` });
+      setOciLastTestStatus(data.status || 'healthy');
+      setOciLastTestedAt(new Date().toISOString());
     } catch (err) {
-      setOciTestStatus({ type: 'error', text: err.response?.data?.detail || 'OCI connection test failed' });
+      const d = err?.response?.data?.detail || err?.response?.data || {};
+      const msg = d?.error?.reason || d?.reason || d?.message || (typeof d === 'string' ? d : 'OCI connection test failed');
+      setOciTestStatus({ type: 'error', text: msg });
     } finally {
       setTestingConnection(false);
+    }
+  };
+
+  const handleUploadKey = async () => {
+    if (!selectedKeyFile) return;
+    setUploadingKey(true);
+    try {
+      await uploadOciKey(selectedKeyFile);
+      setSaveMessage({ type: 'success', text: 'OCI private key uploaded.' });
+    } catch (err) {
+      setSaveMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to upload key' });
+    } finally {
+      setUploadingKey(false);
     }
   };
 
@@ -361,29 +371,32 @@ function Settings({ onAuthChange, forceLogin = false }) {
 
           <div className="rounded-2xl border border-white/60 bg-white/90 p-5 shadow-lg 2xl:col-span-2">
             <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900"><ServerCog size={18} className="text-cyan-700" />OCI SDK Integration</h3>
-            <p className="mb-3 text-xs text-slate-500">Secret sources: direct values, environment overrides, or vault:// references (recommended for production).</p>
-            <div className="mb-4 grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
-              <button onClick={() => setOciAuthMode('profile')} className={`rounded-lg px-3 py-2 text-sm ${ociAuthMode === 'profile' ? 'bg-white shadow-sm' : ''}`}>Profile Config</button>
-              <button onClick={() => setOciAuthMode('direct')} className={`rounded-lg px-3 py-2 text-sm ${ociAuthMode === 'direct' ? 'bg-white shadow-sm' : ''}`}>Direct Credentials</button>
+            <p className="mb-3 text-xs text-slate-500">Private keys are never displayed or returned after upload.</p>
+            <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <input type="text" value={ociUser} onChange={(e) => setOciUser(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="User OCID" />
+              <input type="text" value={ociFingerprint} onChange={(e) => setOciFingerprint(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Fingerprint" />
+              <input type="text" value={ociTenancy} onChange={(e) => setOciTenancy(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Tenancy OCID" />
+              <input type="text" value={ociRegion} onChange={(e) => setOciRegion(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Region" />
             </div>
-            {ociAuthMode === 'profile' ? (
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <input type="text" value={ociConfigProfile} onChange={(e) => setOciConfigProfile(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Profile Name" />
-                <input type="text" value={ociConfigFile} onChange={(e) => setOciConfigFile(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="/root/.oci/config" />
+            <div className="mb-4 rounded-xl border border-slate-200 p-4">
+              <h4 className="mb-2 text-sm font-semibold text-slate-800">Private Key Upload</h4>
+              <input type="file" accept=".pem" onChange={(e) => setSelectedKeyFile(e.target.files?.[0] || null)} className="mb-2 block w-full text-sm text-slate-700" />
+              <div className="flex flex-wrap gap-2">
+                <button onClick={handleUploadKey} disabled={!selectedKeyFile || uploadingKey} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white">
+                  {uploadingKey ? 'Uploading...' : 'Upload / Replace OCI Key'}
+                </button>
+                <button type="button" onClick={() => setShowAdvancedPem((v) => !v)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700">
+                  {showAdvancedPem ? 'Hide Advanced' : 'Show Advanced'}
+                </button>
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <input type="text" value={ociUser} onChange={(e) => setOciUser(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="User OCID" />
-                  <input type="text" value={ociFingerprint} onChange={(e) => setOciFingerprint(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Fingerprint" />
-                  <input type="text" value={ociTenancy} onChange={(e) => setOciTenancy(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Tenancy OCID" />
-                  <input type="text" value={ociRegion} onChange={(e) => setOciRegion(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Region" />
-                  <input type="text" value={ociKeyFile} onChange={(e) => setOciKeyFile(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Key file path" />
-                  <input type="password" value={ociPassPhrase} onChange={(e) => setOciPassPhrase(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Passphrase (optional)" />
-                </div>
-                <textarea rows={7} value={ociKeyContent} onChange={(e) => setOciKeyContent(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs" placeholder="Private key content (optional)" />
-              </div>
-            )}
+              {showAdvancedPem ? <p className="mt-2 text-xs text-slate-500">Paste PEM is disabled by default in production. Use file upload.</p> : null}
+            </div>
+            <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              <div>Fingerprint: <span className="font-medium text-slate-900">{ociFingerprint || '-'}</span></div>
+              <div>Region: <span className="font-medium text-slate-900">{ociRegion || '-'}</span></div>
+              <div>Last Test Status: <span className="font-medium text-slate-900">{ociLastTestStatus || '-'}</span></div>
+              <div>Last Tested: <span className="font-medium text-slate-900">{ociLastTestedAt ? new Date(ociLastTestedAt).toLocaleString() : '-'}</span></div>
+            </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <button onClick={handleTestConnection} disabled={testingConnection} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white">{testingConnection ? 'Testing...' : 'Test Connection'}</button>
               <button onClick={handleSaveSettings} disabled={settingsLoading} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white">{settingsLoading ? 'Saving...' : 'Save Settings'}</button>

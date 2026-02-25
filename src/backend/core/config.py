@@ -1,8 +1,10 @@
 """Application configuration management."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +16,9 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
     debug: bool = False
     demo_mode_default: bool = False
+    app_env: str = os.getenv("APP_ENV", "development")
+    allow_oci_file_path_mode: bool = False if os.getenv("APP_ENV", "development").lower() == "production" else True
+    app_master_key: str = ""
     
     # API
     api_prefix: str = "/api/v1"
@@ -43,6 +48,22 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
     )
+
+    @model_validator(mode="after")
+    def _validate_production_master_key(self):
+        if (self.app_env or "").lower() != "production":
+            return self
+        raw = (self.app_master_key or "").strip()
+        if not raw:
+            raise RuntimeError("APP_MASTER_KEY required in production")
+        try:
+            import base64
+            decoded = base64.b64decode(raw, validate=True)
+        except Exception:
+            decoded = raw.encode("utf-8")
+        if len(decoded) < 32:
+            raise RuntimeError("APP_MASTER_KEY required in production")
+        return self
 
 
 @lru_cache()

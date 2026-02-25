@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import time
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
@@ -15,9 +16,13 @@ router = APIRouter()
 
 def _db_write_probe() -> tuple[bool, str]:
     try:
+        probe_id = int(time.time())
         with engine.begin() as conn:
             conn.execute(text("CREATE TABLE IF NOT EXISTS __health_probe (id INTEGER PRIMARY KEY, ts TEXT NOT NULL)"))
-            conn.execute(text("INSERT INTO __health_probe (ts) VALUES (:ts)"), {"ts": datetime.now(UTC).isoformat()})
+            conn.execute(
+                text("INSERT INTO __health_probe (id, ts) VALUES (:id, :ts)"),
+                {"id": probe_id, "ts": datetime.now(UTC).isoformat()},
+            )
             conn.execute(
                 text(
                     "DELETE FROM __health_probe WHERE id NOT IN (SELECT id FROM __health_probe ORDER BY id DESC LIMIT 3)"
@@ -69,4 +74,3 @@ async def oci_health_check():
             status_code=503,
             detail=f"OCI connection failed: {str(e)}",
         )
-

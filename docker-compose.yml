@@ -96,6 +96,10 @@ services:
       REDIS_URL: "redis://redis:6379/0"
       CELERY_BROKER_URL: "redis://redis:6379/1"
       CELERY_RESULT_BACKEND: "redis://redis:6379/2"
+      OCI_CONFIG_FILE: "/home/app/.oci/config"
+      OCI_CONFIG_PROFILE: "DEFAULT"
+    volumes:
+      - ${OCI_CONFIG_DIR:-C:/Users/hosam/.oci}:/home/app/.oci:ro
     depends_on:
       backend:
         condition: service_started

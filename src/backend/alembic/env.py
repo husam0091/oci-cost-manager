@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 
 from core.database import Base
 import core.models  # noqa: F401
+from core.models import EncryptedSecret, OciIntegration  # noqa: F401
 
 config = context.config
 
@@ -44,4 +45,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-

@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 from fastapi.testclient import TestClient
 
@@ -77,6 +78,11 @@ def test_export_generate_creates_manifest_and_validation(monkeypatch, tmp_path: 
         assert "report_type" in manifest
         assert "selected_filters" in manifest
         assert "generated_at" in manifest
+        assert "generated_by" in manifest
+        assert "actor" in manifest
+        assert "oci_auth_mode" in manifest
+        assert "oci_config_profile" in manifest
+        assert "scan_run_id" in manifest
         assert "start_date" in manifest and "end_date" in manifest
 
         validation = validation_path.read_text(encoding="utf-8")
@@ -88,6 +94,33 @@ def test_export_generate_creates_manifest_and_validation(monkeypatch, tmp_path: 
         list_response = client.get("/api/v1/admin/exports/list")
         assert list_response.status_code == 200
         assert isinstance(list_response.json()["data"], list)
+    finally:
+        app.dependency_overrides.pop(admin._require_admin, None)
+
+
+def test_export_snapshot_includes_required_metadata(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(admin, "get_app_settings", lambda: SimpleNamespace(export_dir=str(tmp_path), app_version="1.0.0", app_name="OCI Cost Manager"))
+    app.dependency_overrides[admin._require_admin] = lambda: {"sub": "tester"}
+    try:
+        response = client.post(
+            "/api/v1/admin/exports/snapshot",
+            json={
+                "name": "metadata-check",
+                "report_type": "snapshot",
+                "export_format": "json",
+                "include_scan_runs": False,
+            },
+        )
+        assert response.status_code == 200
+        file_name = response.json()["data"]["file_name"]
+        payload = json.loads((tmp_path / file_name).read_text(encoding="utf-8"))
+        meta = payload["meta"]
+        assert "generated_at" in meta
+        assert meta.get("generated_by") == "tester"
+        assert meta.get("actor") == "tester"
+        assert "oci_auth_mode" in meta
+        assert "oci_config_profile" in meta
+        assert "scan_run_id" in meta
     finally:
         app.dependency_overrides.pop(admin._require_admin, None)
 

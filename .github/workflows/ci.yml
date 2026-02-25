@@ -60,6 +60,11 @@ jobs:
       - name: Compile check
         run: python -m compileall -q .
 
+      - name: Security response leak gates
+        run: |
+          ! rg -n "\"(oci_key_content|oci_key_file|oci_pass_phrase|oci_config_file)\"\\s*:" src/backend/api/routes
+          ! rg -n "-----BEGIN|PRIVATE KEY" src/backend/api/routes src/frontend/src/services
+
       - name: Run tests
         env:
           PYTHONPATH: src/backend

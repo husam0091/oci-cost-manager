@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-import { costsBreakdown, costsMovers, dashboardSummary, getMe } from '../services/api';
+import { costsBreakdownV2, costsMoversV2, dashboardSummaryV2, getMe } from '../services/api';
 import { getDateRangeForPreset } from '../utils/dateRanges';
 import { UI_COPY } from '../constants/copy';
 import { useStaleSnapshotQuery } from '../hooks/useStaleSnapshotQuery';
@@ -113,14 +113,14 @@ function Dashboard({ persona = 'Executive' }) {
   const [demoMode, setDemoMode] = useState(false);
 
   const loadDashboardData = useCallback(async () => {
-    const summaryRes = await dashboardSummary({
+    const summaryRes = await dashboardSummaryV2({
       start_date: period.start,
       end_date: period.end,
       compare: 'previous',
     });
 
     const [breakdownRes, moversRes] = await Promise.all([
-      costsBreakdown({
+      costsBreakdownV2({
         group_by: 'service',
         start_date: period.start,
         end_date: period.end,
@@ -128,7 +128,7 @@ function Dashboard({ persona = 'Executive' }) {
         limit: 8,
         min_share_pct: 0.5,
       }),
-      costsMovers({
+      costsMoversV2({
         group_by: moversGroupBy,
         start_date: period.start,
         end_date: period.end,
@@ -225,7 +225,7 @@ function Dashboard({ persona = 'Executive' }) {
     <div className="min-h-full space-y-6 bg-slate-50 p-1">
       {error ? (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          Showing cached snapshot. Latest refresh failed: {error}
+          Data unavailable due to API error
           <button
             type="button"
             onClick={() => refresh()}
@@ -299,7 +299,7 @@ function Dashboard({ persona = 'Executive' }) {
 
       {isZeroTotal ? (
         <SectionCard muted>
-          <EmptyState text={UI_COPY.empty.noCostDataSelectedRange} />
+          <EmptyState text="No data for selected range" />
         </SectionCard>
       ) : null}
 
@@ -436,7 +436,7 @@ function Dashboard({ persona = 'Executive' }) {
         <h2 className="text-sm font-medium text-slate-600">Top Services</h2>
         <div className="mt-3 space-y-3">
           {topServices.length === 0 ? (
-            <EmptyState text={UI_COPY.empty.noCostData} />
+            <EmptyState text="No data for selected range" />
           ) : (
             topServices.map((row) => <TopServiceRow key={row.name} row={row} />)
           )}
@@ -504,7 +504,7 @@ function Dashboard({ persona = 'Executive' }) {
         </div>
         <div className="mt-3 overflow-x-auto">
           {moversItems.length === 0 ? (
-            <EmptyState text={UI_COPY.empty.noCostData} />
+            <EmptyState text="No data for selected range" />
           ) : (
             <table className="w-full text-sm">
               <thead>

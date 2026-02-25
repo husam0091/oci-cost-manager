@@ -11,6 +11,24 @@ const api = axios.create({
   withCredentials: true, // For HTTP-only cookies (auth)
 });
 
+const emitGlobalApiError = (error) => {
+  const payload = {
+    message: error?.response?.data?.error?.reason
+      || error?.response?.data?.detail?.error?.reason
+      || error?.response?.data?.detail
+      || error?.message
+      || 'API request failed',
+    code: error?.response?.data?.error?.code
+      || error?.response?.data?.detail?.error?.code
+      || 'API_ERROR',
+    correlation_id:
+      error?.response?.headers?.['x-correlation-id']
+      || error?.response?.data?.error?.correlation_id
+      || error?.response?.data?.detail?.error?.correlation_id,
+  };
+  window.dispatchEvent(new CustomEvent('app:api-error', { detail: payload }));
+};
+
 const CORR_KEY = 'x_correlation_id';
 const telemetryWindow = [];
 const TELEMETRY_MAX_BURST = 5;
@@ -99,6 +117,7 @@ api.interceptors.response.use(
         },
       });
     }
+    emitGlobalApiError(error);
     return Promise.reject(error);
   },
 );
@@ -134,6 +153,13 @@ export const adminSetImportantCompartments = (data) => api.post('/admin/settings
 export const adminLogout = () => api.post('/admin/logout');
 export const adminGetFeatureFlags = () => api.get('/admin/settings/feature-flags');
 export const adminUpdateFeatureFlags = (data) => api.post('/admin/settings/feature-flags', data);
+export const saveOciSettings = (data) => api.post('/settings/oci', data);
+export const uploadOciKey = (file) => {
+  const form = new FormData();
+  form.append('key_file', file);
+  return api.post('/settings/oci/key', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+};
+export const testOciSettings = () => api.post('/settings/oci/test');
 export const getMe = () => api.get('/me');
 export const getOpsMetrics = () => api.get('/ops/metrics');
 export const getDiagnostics = () => api.get('/diagnostics');
@@ -165,62 +191,86 @@ const mapRangeFromParams = (params = {}) => {
   if (params.range) return params.range;
   return 'prev_month';
 };
-export const getCostSummary = (params = {}) =>
-  api.get('/cost/summary', { params: { range: mapRangeFromParams(params) } }).then((res) => {
+const toIsoDate = (value) => (typeof value === 'string' ? value : new Date(value).toISOString().slice(0, 10));
+const resolveDateRange = (params = {}) => {
+  if (params.start_date && params.end_date) {
+    return {
+      start_date: toIsoDate(params.start_date),
+      end_date: toIsoDate(params.end_date),
+    };
+  }
+  const now = new Date();
+  const range = mapRangeFromParams(params);
+  if (range === 'ytd') {
+    return {
+      start_date: `${now.getFullYear()}-01-01`,
+      end_date: toIsoDate(now),
+    };
+  }
+  if (range === 'prev_year' || range === 'yearly') {
+    const y = now.getFullYear() - 1;
+    return {
+      start_date: `${y}-01-01`,
+      end_date: `${y}-12-31`,
+    };
+  }
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  return {
+    start_date: toIsoDate(start),
+    end_date: toIsoDate(end),
+  };
+};
+export const getCostSummary = (params = {}) => {
+  const { start_date, end_date } = resolveDateRange(params);
+  return api.get('/dashboard/summary', { params: { start_date, end_date, compare: 'previous' } }).then((res) => {
     const d = res?.data?.data || {};
     return {
       ...res,
       data: {
         ...res.data,
         data: {
-          total: d.total_cost || 0,
-          delta_abs: d.delta_vs_previous || 0,
-          delta_pct: d.delta_pct || 0,
-          top_driver: { entity: d.top_driver?.name || 'No data', share: 0 },
-          biggest_mover: { entity: d.top_driver?.name || 'No data', delta_abs: d.delta_vs_previous || 0, delta_pct: d.delta_pct || 0 },
-          unallocated: d.unallocated || { count: 0, pct: 0 },
-          last_computed_at: d.last_computed_at,
-          stale: Boolean(d.stale),
+          total: d?.totals?.current || 0,
+          delta_abs: d?.totals?.delta_abs || 0,
+          delta_pct: d?.totals?.delta_pct || 0,
+          top_driver: { entity: d?.top_driver?.group || 'No data', share: d?.top_driver?.share_pct || 0 },
+          biggest_mover: {
+            entity: d?.biggest_mover?.entity_name || 'No data',
+            delta_abs: d?.biggest_mover?.delta_abs || 0,
+            delta_pct: d?.biggest_mover?.delta_pct || 0,
+          },
+          unallocated: { count: 0, pct: d?.mapping_health?.unallocated_pct || 0 },
+          last_computed_at: d?.generated_at || null,
+          stale: false,
         },
       },
     };
   });
+};
 export const getCostBreakdown = (params = {}) => {
-  const groupBy = params.group_by || 'service';
-  const range = mapRangeFromParams(params);
+  const { start_date, end_date } = resolveDateRange(params);
+  const group_by = params.group_by || 'service';
+  const compare = params.compare || 'previous';
   const limit = params.limit || 20;
-  if (groupBy === 'compartment') {
-    return api.get('/cost/by-compartment', { params: { range, limit } }).then((res) => ({
-      ...res,
-      data: {
-        ...res.data,
-        data: { items: res?.data?.data?.items || [], mapping_health: { unowned_cost: 0, low_confidence_cost: 0 } },
-      },
-    }));
-  }
-  if (groupBy === 'resource') {
-    return api.get('/cost/by-resource', { params: { range, limit } }).then((res) => ({
-      ...res,
-      data: {
-        ...res.data,
-        data: { items: res?.data?.data?.items || [], mapping_health: { unowned_cost: 0, low_confidence_cost: 0 } },
-      },
-    }));
-  }
-  return api.get('/cost/by-service', { params: { range, limit } }).then((res) => ({
+  const min_share_pct = params.min_share_pct ?? 0;
+  return api.get('/costs/breakdown', { params: { group_by, start_date, end_date, compare, limit, min_share_pct } }).then((res) => ({
     ...res,
     data: {
       ...res.data,
-      data: { items: res?.data?.data?.items || [], mapping_health: { unowned_cost: 0, low_confidence_cost: 0 } },
+      data: {
+        items: res?.data?.data?.items || [],
+        mapping_health: res?.data?.data?.mapping_health || { unowned_cost: 0, low_confidence_cost: 0 },
+      },
     },
   }));
 };
 export const getCostMovers = (params = {}) => {
-  const groupBy = params.group_by || 'service';
-  const range = mapRangeFromParams(params);
+  const { start_date, end_date } = resolveDateRange(params);
+  const group_by = params.group_by || 'service';
+  const compare = params.compare || 'previous';
   const limit = params.limit || 20;
-  const endpoint = groupBy === 'resource' ? '/cost/by-resource' : (groupBy === 'compartment' ? '/cost/by-compartment' : '/cost/by-service');
-  return api.get(endpoint, { params: { range, limit } }).then((res) => ({
+  const direction = params.direction || 'up';
+  return api.get('/costs/movers', { params: { group_by, start_date, end_date, compare, limit, direction } }).then((res) => ({
     ...res,
     data: {
       ...res.data,
@@ -235,41 +285,14 @@ export const adminGetAllocationRules = () => api.get('/admin/allocation-rules');
 export const adminCreateAllocationRule = (data) => api.post('/admin/allocation-rules', data);
 export const adminUpdateAllocationRule = (id, data) => api.put(`/admin/allocation-rules/${id}`, data);
 export const adminDeleteAllocationRule = (id) => api.delete(`/admin/allocation-rules/${id}`);
+const _toIsoDate = (value) => (typeof value === 'string' ? value : new Date(value).toISOString().slice(0, 10));
+
 export const dashboardSummary = ({ start_date, end_date }) =>
-  api.get('/cost/summary', { params: { range: 'prev_month' } }).then((res) => {
-    const d = res?.data?.data || {};
-    const current = d.total_cost || 0;
-    const previous = current - (d.delta_vs_previous || 0);
-    return {
-      ...res,
-      data: {
-        ...res.data,
-        data: {
-          totals: {
-            current,
-            previous,
-            delta_abs: d.delta_vs_previous || 0,
-            delta_pct: d.delta_pct || 0,
-          },
-          top_driver: {
-            group: d.top_driver?.name || 'No data',
-            current: d.top_driver?.cost || 0,
-            share_pct: 0,
-            delta_abs: d.delta_vs_previous || 0,
-            delta_pct: d.delta_pct || 0,
-          },
-          biggest_mover: {
-            entity_type: 'service',
-            entity_name: d.top_driver?.name || 'No data',
-            delta_abs: d.delta_vs_previous || 0,
-            delta_pct: d.delta_pct || 0,
-          },
-          mapping_health: { unallocated_pct: 0, low_confidence_count: d.unallocated?.count || 0 },
-          period: { start_date, end_date, days: 30 },
-          stale: Boolean(d.stale),
-        },
-      },
-    };
+  api.get('/dashboard/summary', {
+    params: {
+      start_date: _toIsoDate(start_date),
+      end_date: _toIsoDate(end_date),
+    },
   });
 export const costsBreakdown = ({
   group_by = 'service',
@@ -279,20 +302,16 @@ export const costsBreakdown = ({
   limit = 8,
   min_share_pct = 0.5,
 }) => {
-  void start_date;
-  void end_date;
-  void compare;
-  void min_share_pct;
-  if (group_by === 'compartment') {
-    return api.get('/cost/by-compartment', { params: { range: 'prev_month', limit } }).then((res) => ({
-      ...res,
-      data: { ...res.data, data: { items: res?.data?.data?.items || [] } },
-    }));
-  }
-  return api.get('/cost/by-service', { params: { range: 'prev_month', limit } }).then((res) => ({
-    ...res,
-    data: { ...res.data, data: { items: res?.data?.data?.items || [] } },
-  }));
+  return api.get('/costs/breakdown', {
+    params: {
+      group_by,
+      start_date: _toIsoDate(start_date),
+      end_date: _toIsoDate(end_date),
+      compare,
+      limit,
+      min_share_pct,
+    },
+  });
 };
 export const costsMovers = ({
   group_by = 'service',
@@ -302,16 +321,64 @@ export const costsMovers = ({
   limit = 10,
   direction = 'up',
 }) => {
-  void start_date;
-  void end_date;
-  void compare;
-  void direction;
-  const endpoint = group_by === 'compartment' ? '/cost/by-compartment' : '/cost/by-service';
-  return api.get(endpoint, { params: { range: 'prev_month', limit } }).then((res) => ({
-    ...res,
-    data: { ...res.data, data: { items: res?.data?.data?.items || [] } },
-  }));
+  return api.get('/costs/movers', {
+    params: {
+      group_by,
+      start_date: _toIsoDate(start_date),
+      end_date: _toIsoDate(end_date),
+      compare,
+      limit,
+      direction,
+    },
+  });
 };
+
+// Explicit V2 bindings used by Dashboard to avoid legacy wrapper ambiguity.
+export const dashboardSummaryV2 = ({ start_date, end_date }) =>
+  api.get('/dashboard/summary', {
+    params: {
+      start_date: _toIsoDate(start_date),
+      end_date: _toIsoDate(end_date),
+    },
+  });
+
+export const costsBreakdownV2 = ({
+  group_by = 'service',
+  start_date,
+  end_date,
+  compare = 'previous',
+  limit = 8,
+  min_share_pct = 0.5,
+}) =>
+  api.get('/costs/breakdown', {
+    params: {
+      group_by,
+      start_date: _toIsoDate(start_date),
+      end_date: _toIsoDate(end_date),
+      compare,
+      limit,
+      min_share_pct,
+    },
+  });
+
+export const costsMoversV2 = ({
+  group_by = 'service',
+  start_date,
+  end_date,
+  compare = 'previous',
+  limit = 10,
+  direction = 'up',
+}) =>
+  api.get('/costs/movers', {
+    params: {
+      group_by,
+      start_date: _toIsoDate(start_date),
+      end_date: _toIsoDate(end_date),
+      compare,
+      limit,
+      direction,
+    },
+  });
 export const recommendationsSummary = ({ start_date, end_date }) => {
   const params = {
     start_date: typeof start_date === 'string' ? start_date : new Date(start_date).toISOString().slice(0, 10),

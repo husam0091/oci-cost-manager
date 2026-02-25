@@ -1,6 +1,6 @@
 """SQLAlchemy models for persisted data."""
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from sqlalchemy import (
     Boolean,
     Column,
@@ -36,6 +36,9 @@ class Setting(Base):
     oci_key_file = Column(String(512), nullable=True)
     oci_key_content = Column(Text, nullable=True)
     oci_pass_phrase = Column(String(512), nullable=True)
+    oci_last_test_status = Column(String(32), nullable=True)
+    oci_last_tested_at = Column(DateTime(timezone=True), nullable=True)
+    oci_last_test_error = Column(Text, nullable=True)
     important_compartments = Column(JSON, nullable=True)
     important_compartment_ids = Column(JSON, nullable=True)
     important_include_children = Column(Boolean, nullable=False, default=True)
@@ -58,8 +61,8 @@ class Setting(Base):
     enable_destructive_actions = Column(Boolean, nullable=False, default=False)
     enable_budget_auto_eval = Column(Boolean, nullable=False, default=True)
     enable_demo_mode = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
 
 class ScanRun(Base):
@@ -335,6 +338,34 @@ class OciDiagnostics(Base):
     __table_args__ = (
         Index("idx_oci_diagnostics_checked_at_desc", "checked_at"),
     )
+
+
+class OciIntegration(Base):
+    __tablename__ = "oci_integrations"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_ocid = Column(String(255), nullable=False)
+    tenancy_ocid = Column(String(255), nullable=False)
+    fingerprint = Column(String(128), nullable=False)
+    region = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False, default="degraded")
+    last_tested_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    rotated_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(String(255), nullable=False)
+    updated_by = Column(String(255), nullable=False)
+
+
+class EncryptedSecret(Base):
+    __tablename__ = "encrypted_secrets"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scope = Column(String(64), nullable=False, index=True)
+    secret_name = Column(String(64), nullable=False, index=True)
+    ciphertext = Column(Text, nullable=False)
+    nonce = Column(Text, nullable=False)
+    salt = Column(Text, nullable=False)
+    key_version = Column(String(32), nullable=False, default="v1")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    rotated_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class LogEvent(Base):
