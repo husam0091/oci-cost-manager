@@ -1,0 +1,146 @@
+﻿# Project Structure (Simple File Guide)
+
+This follows the common style used in similar FastAPI + React repositories: short per-file purpose notes.
+
+## Files
+
+- `.env.example`: Template environment variables for local/server setup.
+- `.github/workflows/ci.yml`: GitHub Actions pipeline for frontend/backend checks and Docker build.
+- `.gitignore`: Ignore rules to keep secrets, caches, and build artifacts out of Git.
+- `AI-HANDOFF-SUMMARY.md`: Project file supporting runtime, docs, or development workflow.
+- `COST-ANALYSIS-DATE-RANGE-FIX-2026-02-08.md`: Project file supporting runtime, docs, or development workflow.
+- `GOVERNANCE-REDESIGN-IMPLEMENTATION-PLAN-2026-02-08.md`: Project file supporting runtime, docs, or development workflow.
+- `README.md`: Main project overview and quick start instructions.
+- `REPORT-CATALOG-AND-DASHBOARD-UPGRADE-2026-02-08.md`: Project file supporting runtime, docs, or development workflow.
+- `architecture.md`: Project file supporting runtime, docs, or development workflow.
+- `comparment.md`: Project file supporting runtime, docs, or development workflow.
+- `docker-compose.yml`: Local/production container topology for app, DB, cache, and worker.
+- `docs/bmad/architecture.md`: Planning/architecture documentation used during solution design.
+- `docs/bmad/business-requirements.md`: Planning/architecture documentation used during solution design.
+- `docs/bmad/data-model.md`: Planning/architecture documentation used during solution design.
+- `docs/bmad/development-plan.md`: Planning/architecture documentation used during solution design.
+- `example/README.md`: Sample scripts and reference setup for standalone usage/export flows.
+- `example/oci-report-cyber.py`: Sample scripts and reference setup for standalone usage/export flows.
+- `example/oci_report_cyber.py`: Sample scripts and reference setup for standalone usage/export flows.
+- `example/requirements.txt`: Sample scripts and reference setup for standalone usage/export flows.
+- `implementation-readiness-report-2026-02-06.md`: Project file supporting runtime, docs, or development workflow.
+- `product-brief-oci-cost-manager-2026-02-06T14-49-01.md`: Project file supporting runtime, docs, or development workflow.
+- `src/backend/.dockerignore`: Backend configuration/source file: .dockerignore.
+- `src/backend/.env.example`: Backend configuration/source file: .env.example.
+- `src/backend/Dockerfile`: Backend configuration/source file: Dockerfile.
+- `src/backend/alembic.ini`: Backend configuration/source file: alembic.ini.
+- `src/backend/alembic/env.py`: Alembic migration configuration and environment wiring.
+- `src/backend/alembic/versions/20260213_01_phase3_aggregates_and_snapshots.py`: Database migration for schema evolution.
+- `src/backend/alembic/versions/20260213_02_phase4_oci_diagnostics.py`: Database migration for schema evolution.
+- `src/backend/alembic/versions/20260213_03_phase5_logging_tables.py`: Database migration for schema evolution.
+- `src/backend/api/__init__.py`: Backend configuration/source file: __init__.py.
+- `src/backend/api/routes/__init__.py`: FastAPI route handlers for the __init__ API domain.
+- `src/backend/api/routes/actions.py`: FastAPI route handlers for the actions API domain.
+- `src/backend/api/routes/admin.py`: FastAPI route handlers for the admin API domain.
+- `src/backend/api/routes/budgets.py`: FastAPI route handlers for the budgets API domain.
+- `src/backend/api/routes/cache.py`: FastAPI route handlers for the cache API domain.
+- `src/backend/api/routes/compartments.py`: FastAPI route handlers for the compartments API domain.
+- `src/backend/api/routes/cost.py`: FastAPI route handlers for the cost API domain.
+- `src/backend/api/routes/costs.py`: FastAPI route handlers for the costs API domain.
+- `src/backend/api/routes/dashboard.py`: FastAPI route handlers for the dashboard API domain.
+- `src/backend/api/routes/data.py`: FastAPI route handlers for the data API domain.
+- `src/backend/api/routes/diagnostics.py`: FastAPI route handlers for the diagnostics API domain.
+- `src/backend/api/routes/governance.py`: FastAPI route handlers for the governance API domain.
+- `src/backend/api/routes/health.py`: FastAPI route handlers for the health API domain.
+- `src/backend/api/routes/insights.py`: FastAPI route handlers for the insights API domain.
+- `src/backend/api/routes/jobs.py`: FastAPI route handlers for the jobs API domain.
+- `src/backend/api/routes/logs.py`: FastAPI route handlers for the logs API domain.
+- `src/backend/api/routes/me.py`: FastAPI route handlers for the me API domain.
+- `src/backend/api/routes/ops.py`: FastAPI route handlers for the ops API domain.
+- `src/backend/api/routes/prices.py`: FastAPI route handlers for the prices API domain.
+- `src/backend/api/routes/recommendations.py`: FastAPI route handlers for the recommendations API domain.
+- `src/backend/api/routes/resources.py`: FastAPI route handlers for the resources API domain.
+- `src/backend/api/schemas/__init__.py`: Pydantic schemas/contracts for __init__ endpoints.
+- `src/backend/api/schemas/actions.py`: Pydantic schemas/contracts for actions endpoints.
+- `src/backend/api/schemas/budgets.py`: Pydantic schemas/contracts for budgets endpoints.
+- `src/backend/api/schemas/costs.py`: Pydantic schemas/contracts for costs endpoints.
+- `src/backend/api/schemas/dashboard.py`: Pydantic schemas/contracts for dashboard endpoints.
+- `src/backend/api/schemas/recommendations.py`: Pydantic schemas/contracts for recommendations endpoints.
+- `src/backend/api/utils/__init__.py`: Shared API helper utilities (date parsing, response helpers, etc.).
+- `src/backend/api/utils/dates.py`: Shared API helper utilities (date parsing, response helpers, etc.).
+- `src/backend/core/__init__.py`: Core backend infrastructure module: __init__.
+- `src/backend/core/auth.py`: Core backend infrastructure module: auth.
+- `src/backend/core/cache.py`: Core backend infrastructure module: cache.
+- `src/backend/core/config.py`: Core backend infrastructure module: config.
+- `src/backend/core/database.py`: Core backend infrastructure module: database.
+- `src/backend/core/models.py`: Core backend infrastructure module: models.
+- `src/backend/core/rbac.py`: Core backend infrastructure module: rbac.
+- `src/backend/core/redis_cache.py`: Core backend infrastructure module: redis_cache.
+- `src/backend/core/scheduler.py`: Core backend infrastructure module: scheduler.
+- `src/backend/core/secrets.py`: Core backend infrastructure module: secrets.
+- `src/backend/main.py`: FastAPI app bootstrap and router wiring.
+- `src/backend/pytest.ini`: Backend configuration/source file: pytest.ini.
+- `src/backend/requirements.txt`: Backend configuration/source file: requirements.txt.
+- `src/backend/scripts/db_backup_restore.py`: Operational helper scripts for backup/restore and maintenance.
+- `src/backend/services/__init__.py`: Business service layer module for __init__ logic.
+- `src/backend/services/actions_engine.py`: Business service layer module for actions_engine logic.
+- `src/backend/services/aggregate_engine.py`: Business service layer module for aggregate_engine logic.
+- `src/backend/services/allocation.py`: Business service layer module for allocation logic.
+- `src/backend/services/budget_engine.py`: Business service layer module for budget_engine logic.
+- `src/backend/services/budget_validator.py`: Business service layer module for budget_validator logic.
+- `src/backend/services/cost_calculator.py`: Business service layer module for cost_calculator logic.
+- `src/backend/services/event_logger.py`: Business service layer module for event_logger logic.
+- `src/backend/services/executors/__init__.py`: Safe/local action executors (dry-run and controlled operations).
+- `src/backend/services/executors/cleanup_unattached_volume.py`: Safe/local action executors (dry-run and controlled operations).
+- `src/backend/services/executors/notify_only.py`: Safe/local action executors (dry-run and controlled operations).
+- `src/backend/services/executors/stop_idle_instance.py`: Safe/local action executors (dry-run and controlled operations).
+- `src/backend/services/executors/tag_fix.py`: Safe/local action executors (dry-run and controlled operations).
+- `src/backend/services/executors_oci/__init__.py`: OCI-backed action executors for real infrastructure operations.
+- `src/backend/services/executors_oci/delete_unattached_volume_oci.py`: OCI-backed action executors for real infrastructure operations.
+- `src/backend/services/executors_oci/stop_instance_oci.py`: OCI-backed action executors for real infrastructure operations.
+- `src/backend/services/executors_oci/tag_fix_oci.py`: OCI-backed action executors for real infrastructure operations.
+- `src/backend/services/notifications.py`: Business service layer module for notifications logic.
+- `src/backend/services/oci_client.py`: Business service layer module for oci_client logic.
+- `src/backend/services/oci_diagnostics.py`: Business service layer module for oci_diagnostics logic.
+- `src/backend/services/price_updater.py`: Business service layer module for price_updater logic.
+- `src/backend/services/recommendations.py`: Business service layer module for recommendations logic.
+- `src/backend/services/scanner.py`: Business service layer module for scanner logic.
+- `src/backend/tests/test_actions_phase5.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_admin_important_compartments.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_api_routes.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_budgets_phase4b.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_costs_aggregations_contract.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_dashboard_and_exports.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_dashboard_summary_contract.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_date_utils_and_db_boot.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_governance_phase3.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_notifications_phase4c.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_phase6_hardening.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_recommendations_contract.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/tests/test_smoke.py`: Automated backend test coverage for API contracts, features, and regressions.
+- `src/backend/worker.py`: Celery worker entrypoint and async job implementations.
+- `src/frontend/.dockerignore`: Frontend tool/build config: .dockerignore.
+- `src/frontend/.eslintignore`: Frontend tool/build config: .eslintignore.
+- `src/frontend/.eslintrc.cjs`: Frontend tool/build config: .eslintrc.cjs.
+- `src/frontend/Dockerfile`: Frontend tool/build config: Dockerfile.
+- `src/frontend/index.html`: Frontend tool/build config: index.html.
+- `src/frontend/nginx.conf`: Frontend tool/build config: nginx.conf.
+- `src/frontend/package-lock.json`: Frontend tool/build config: package-lock.json.
+- `src/frontend/package.json`: Frontend tool/build config: package.json.
+- `src/frontend/postcss.config.js`: Frontend tool/build config: postcss.config.js.
+- `src/frontend/src/App.jsx`: Main React app layout, routes, and shell components.
+- `src/frontend/src/components/GlobalStatusBar.jsx`: Reusable React UI component.
+- `src/frontend/src/constants/copy.js`: Static copy/config constants for UI text and labels.
+- `src/frontend/src/hooks/useStaleSnapshotQuery.js`: Custom React hook for shared state/data-fetch behavior.
+- `src/frontend/src/index.css`: Frontend source module.
+- `src/frontend/src/main.jsx`: Frontend bootstrap and root React mounting.
+- `src/frontend/src/pages/Actions.jsx`: React page view for Actions section.
+- `src/frontend/src/pages/Budget.jsx`: React page view for Budget section.
+- `src/frontend/src/pages/Costs.jsx`: React page view for Costs section.
+- `src/frontend/src/pages/Dashboard.jsx`: React page view for Dashboard section.
+- `src/frontend/src/pages/ExportReports.jsx`: React page view for ExportReports section.
+- `src/frontend/src/pages/Governance.jsx`: React page view for Governance section.
+- `src/frontend/src/pages/Logs.jsx`: React page view for Logs section.
+- `src/frontend/src/pages/Recommendations.jsx`: React page view for Recommendations section.
+- `src/frontend/src/pages/Resources.jsx`: React page view for Resources section.
+- `src/frontend/src/pages/Settings.jsx`: React page view for Settings section.
+- `src/frontend/src/services/api.js`: Frontend API client and HTTP integration helpers.
+- `src/frontend/src/utils/dateRanges.js`: Frontend utility helpers for dates/cache and formatting.
+- `src/frontend/src/utils/staleCache.js`: Frontend utility helpers for dates/cache and formatting.
+- `src/frontend/tailwind.config.js`: Frontend tool/build config: tailwind.config.js.
+- `src/frontend/vite.config.js`: Frontend tool/build config: vite.config.js.

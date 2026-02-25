@@ -1,5 +1,5 @@
 """Admin routes: login, settings, run scan, runs list."""
-from fastapi import APIRouter, Depends, HTTPException, Response, Cookie
+from fastapi import APIRouter, Depends, HTTPException, Response, Cookie, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Any, Optional
@@ -12,10 +12,12 @@ import threading
 import json
 import re
 import csv
+import uuid
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 from core.database import ensure_settings_schema, get_db, SessionLocal
+from core.errors import raise_production_block
 from core.models import ActionEvent, ActionRequest, AllocationRule, BudgetAlertEvent, Compartment, Setting, ScanRun, Resource, CostSnapshot, TrendPoint
 from core.auth import verify_password, hash_password, create_access_token, decode_token
 from core.rbac import feature_flags
@@ -29,6 +31,8 @@ from services.budget_engine import evaluate_budget_statuses
 from services.recommendations import generate_recommendations
 
 router = APIRouter()
+
+_PROD_BLOCKED_FIELDS = {"oci_key_content", "oci_key_file", "oci_pass_phrase", "oci_config_file"}
 
 
 class LoginRequest(BaseModel):
@@ -122,6 +126,20 @@ def _require_admin(token: Optional[str] = Cookie(default=None, alias="access_tok
     return data
 
 
+def _production_blocked_field(payload: BaseModel) -> Optional[str]:
+    cfg = get_app_settings()
+    if cfg.app_env.lower() != "production":
+        return None
+    if cfg.allow_oci_file_path_mode:
+        return None
+    data = payload.model_dump(exclude_none=True)
+    for field in _PROD_BLOCKED_FIELDS:
+        value = data.get(field)
+        if value not in (None, "", []):
+            return field
+    return None
+
+
 @router.post("/login")
 async def login(req: LoginRequest, resp: Response, db: Session = Depends(get_db)):
     s = db.query(Setting).filter(Setting.id == 1).one_or_none()
@@ -155,14 +173,12 @@ async def get_settings(db: Session = Depends(get_db), user=Depends(_require_admi
             "scan_interval_hours": s.scan_interval_hours,
             "oci_auth_mode": getattr(s, "oci_auth_mode", "profile"),
             "oci_config_profile": getattr(s, "oci_config_profile", "DEFAULT"),
-            "oci_config_file": getattr(s, "oci_config_file", None),
             "oci_user": getattr(s, "oci_user", None),
             "oci_fingerprint": getattr(s, "oci_fingerprint", None),
             "oci_tenancy": getattr(s, "oci_tenancy", None),
             "oci_region": getattr(s, "oci_region", None),
-            "oci_key_file": getattr(s, "oci_key_file", None),
-            "oci_key_content": getattr(s, "oci_key_content", None),
-            "oci_pass_phrase": getattr(s, "oci_pass_phrase", None),
+            "oci_last_test_status": getattr(s, "oci_last_test_status", None),
+            "oci_last_tested_at": s.oci_last_tested_at.isoformat() if getattr(s, "oci_last_tested_at", None) else None,
             "important_compartment_ids": getattr(s, "important_compartment_ids", None) or [],
             "important_include_children": bool(getattr(s, "important_include_children", True)),
             "notifications_email_enabled": bool(getattr(s, "notifications_email_enabled", False)),
@@ -187,8 +203,11 @@ async def get_settings(db: Session = Depends(get_db), user=Depends(_require_admi
 
 
 @router.put("/settings")
-async def update_settings(req: SettingsUpdate, db: Session = Depends(get_db), user=Depends(_require_admin)):
+async def update_settings(req: SettingsUpdate, request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
     ensure_settings_schema()
+    blocked = _production_blocked_field(req)
+    if blocked:
+        raise_production_block(blocked, getattr(request.state, "correlation_id", None))
     s = db.query(Setting).filter(Setting.id == 1).one()
     changed = False
     if req.username:
@@ -364,7 +383,10 @@ async def set_important_compartments(
 
 
 @router.post("/settings/test-oci")
-async def test_settings_oci(req: OciConnectionTestRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
+async def test_settings_oci(req: OciConnectionTestRequest, request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
+    blocked = _production_blocked_field(req)
+    if blocked:
+        raise_production_block(blocked, getattr(request.state, "correlation_id", None))
     s = db.query(Setting).filter(Setting.id == 1).one()
     runtime = {
         "auth_mode": req.oci_auth_mode or getattr(s, "oci_auth_mode", "profile"),
@@ -380,9 +402,28 @@ async def test_settings_oci(req: OciConnectionTestRequest, db: Session = Depends
     }
     try:
         data = test_oci_connection(runtime)
+        s.oci_last_test_status = "healthy"
+        s.oci_last_tested_at = datetime.now(UTC)
+        s.oci_last_test_error = None
+        db.commit()
         return {"success": True, "data": data}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"OCI test failed: {str(exc)}")
+        correlation_id = getattr(request.state, "correlation_id", None) or str(uuid.uuid4())
+        s.oci_last_test_status = "failed"
+        s.oci_last_tested_at = datetime.now(UTC)
+        s.oci_last_test_error = "redacted"
+        db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "OCI_TEST_FAILED",
+                    "reason": "redacted",
+                    "correlation_id": correlation_id,
+                },
+            },
+        )
 
 
 @router.post("/scan/run")
@@ -436,6 +477,7 @@ async def export_snapshot(req: ExportSnapshotRequest, db: Session = Depends(get_
     latest_monthly = db.query(CostSnapshot).filter(CostSnapshot.period == "monthly").order_by(CostSnapshot.start_date.desc()).first() if req.include_cost_snapshot else None
     trends = db.query(TrendPoint).order_by(TrendPoint.month_start.desc()).limit(6).all() if req.include_trend_points else []
     recent_runs = db.query(ScanRun).order_by(ScanRun.id.desc()).limit(20).all() if req.include_scan_runs else []
+    latest_scan = db.query(ScanRun).order_by(ScanRun.id.desc()).first()
     sample_limit = max(0, min(req.include_resource_samples, 2000))
     sample_resources = db.query(Resource).order_by(Resource.updated_at.desc()).limit(sample_limit).all()
 
@@ -458,16 +500,19 @@ async def export_snapshot(req: ExportSnapshotRequest, db: Session = Depends(get_
         "meta": {
             "generated_at": now.isoformat(),
             "generated_by": user.get("sub"),
+            "actor": user.get("sub"),
             "export_name": req.name,
             "source": "oci-cost-manager",
             "version": "1.0.0",
             "format": fmt,
             "report_type": report_type,
+            "oci_auth_mode": getattr(s, "oci_auth_mode", "profile"),
+            "oci_config_profile": getattr(s, "oci_config_profile", None),
+            "scan_run_id": latest_scan.id if latest_scan else None,
         },
         "integration": {
             "auth_mode": getattr(s, "oci_auth_mode", "profile"),
             "profile": getattr(s, "oci_config_profile", None),
-            "config_file": getattr(s, "oci_config_file", None),
             "region": getattr(s, "oci_region", None),
         },
         "resource_counts": {t: c for t, c in counts},
@@ -1145,6 +1190,7 @@ def _build_report_data_v2(
     resources = {r.ocid: r for r in db.query(Resource).all()}
     compartments = {c.id: c.name for c in db.query(Compartment).all()}
     latest_scan = db.query(ScanRun).order_by(ScanRun.id.desc()).first()
+    settings_snapshot = db.query(Setting).filter(Setting.id == 1).one_or_none()
     app_cfg = get_app_settings()
 
     current_total = float(sum(current_services.values()))
@@ -1697,10 +1743,15 @@ def _build_report_data_v2(
             "compartment_ids": list(options.get("compartment_ids") or []),
         },
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "generated_by": user_name,
+        "actor": user_name,
         "app_version": getattr(app_cfg, "app_version", None),
         "git_commit": _get_git_commit(),
         "scan_id": latest_scan.id if latest_scan else None,
+        "scan_run_id": latest_scan.id if latest_scan else None,
         "last_scan_at": latest_scan.finished_at.isoformat().replace("+00:00", "Z") if latest_scan and latest_scan.finished_at else None,
+        "oci_auth_mode": getattr(settings_snapshot, "oci_auth_mode", "profile"),
+        "oci_config_profile": getattr(settings_snapshot, "oci_config_profile", "DEFAULT"),
     }
     if report_type == "optimization_recommendations":
         manifest["detection_rules_used"] = [

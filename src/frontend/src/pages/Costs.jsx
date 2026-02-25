@@ -160,7 +160,7 @@ function Costs() {
 
       {error ? (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-800">
-          Showing cached snapshot. Latest refresh failed: {error}
+          Data unavailable due to API error
           <button
             type="button"
             onClick={() => refresh()}
@@ -256,7 +256,7 @@ function Costs() {
               </div>
             ) : null}
             {empty || rows.length === 0 ? (
-              <p className="text-sm text-slate-500">{UI_COPY.empty.noCostData}</p>
+              <p className="text-sm text-slate-500">No data for selected range</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -298,7 +298,7 @@ function Costs() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="mb-3 text-sm font-medium text-slate-600">Top Movers (Services)</h3>
               {serviceMovers.length === 0 ? (
-                <p className="text-sm text-slate-500">{UI_COPY.empty.noCostData}</p>
+                <p className="text-sm text-slate-500">No data for selected range</p>
               ) : (
                 <div className="space-y-2">
                   {serviceMovers.map((row) => (
@@ -313,7 +313,7 @@ function Costs() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="mb-3 text-sm font-medium text-slate-600">Top Resources</h3>
               {resourceMovers.length === 0 ? (
-                <p className="text-sm text-slate-500">{UI_COPY.empty.noCostData}</p>
+                <p className="text-sm text-slate-500">No data for selected range</p>
               ) : (
                 <div className="space-y-2">
                   {resourceMovers.map((row) => (

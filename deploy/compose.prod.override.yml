@@ -1,0 +1,33 @@
+services:
+  pgbouncer:
+    ports: []
+    expose:
+      - "6432"
+
+  backend:
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
+    group_add:
+      - "${OCI_READ_GID}"
+    environment:
+      APP_ENV: "production"
+      APP_MASTER_KEY: "${APP_MASTER_KEY}"
+      ALLOW_OCI_FILE_PATH_MODE: "${ALLOW_OCI_FILE_PATH_MODE:-true}"
+      OCI_CONFIG_FILE: "/run/secrets/oci/config"
+      OCI_CONFIG_PROFILE: "${OCI_CONFIG_PROFILE:-DEFAULT}"
+      DATABASE_URL: "postgresql+psycopg://ocicost_user:${POSTGRES_PASSWORD}@pgbouncer:5432/ocicost"
+    volumes:
+      - ${OCI_SECRETS_DIR:-/etc/oci-cost-manager/oci}:/run/secrets/oci:ro
+
+  worker:
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
+    group_add:
+      - "${OCI_READ_GID}"
+    environment:
+      APP_ENV: "production"
+      APP_MASTER_KEY: "${APP_MASTER_KEY}"
+      ALLOW_OCI_FILE_PATH_MODE: "${ALLOW_OCI_FILE_PATH_MODE:-true}"
+      OCI_CONFIG_FILE: "/run/secrets/oci/config"
+      OCI_CONFIG_PROFILE: "${OCI_CONFIG_PROFILE:-DEFAULT}"
+      DATABASE_URL: "postgresql+psycopg://ocicost_user:${POSTGRES_PASSWORD}@pgbouncer:5432/ocicost"
+    volumes:
+      - ${OCI_SECRETS_DIR:-/etc/oci-cost-manager/oci}:/run/secrets/oci:ro

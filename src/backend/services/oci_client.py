@@ -8,8 +8,10 @@ from ntpath import basename as win_basename
 
 from core.config import get_settings, get_oci_config_path
 from core.database import SessionLocal
+from core.errors import raise_production_block
 from core.models import Setting
 from core.secrets import resolve_secret
+from services.oci_credentials import get_oci_runtime_credentials
 
 
 class OCIClientService:
@@ -43,9 +45,13 @@ class OCIClientService:
     def config(self) -> dict:
         """Get OCI configuration."""
         if self._config is None:
+            _validate_runtime_path_mode(self.runtime_oci)
             if self.auth_mode == "direct":
                 self._config = _build_direct_config(self.runtime_oci)
             else:
+                app_cfg = get_settings()
+                if app_cfg.app_env.lower() == "production" and not app_cfg.allow_oci_file_path_mode:
+                    raise_production_block("oci_config_file", None)
                 self._config = _load_config_profile(str(self.config_path), self.profile_name)
             _normalize_key_file_path(self._config)
             oci.config.validate_config(self._config)
@@ -437,6 +443,11 @@ def _load_runtime_oci_settings() -> dict[str, Any]:
     """Load OCI settings from persisted settings if available."""
     db = SessionLocal()
     try:
+        app_cfg = get_settings()
+        if app_cfg.app_env.lower() == "production":
+            secure = get_oci_runtime_credentials(db)
+            if secure:
+                return secure
         setting = db.query(Setting).filter(Setting.id == 1).one_or_none()
         if not setting:
             return {}
@@ -477,6 +488,11 @@ def _load_config_profile(config_file: str, profile_name: str) -> dict:
 
 def _normalize_key_file_path(config: dict[str, Any]) -> None:
     """Map host key_file paths to mounted container paths when needed."""
+    cfg = get_settings()
+    if cfg.app_env.lower() == "production" and not cfg.allow_oci_file_path_mode:
+        if config.get("key_file"):
+            raise_production_block("oci_key_file", None)
+        return
     key_file = config.get("key_file")
     if not key_file:
         return
@@ -507,7 +523,27 @@ def _build_direct_config(runtime_oci: dict[str, Any]) -> dict[str, Any]:
     if key_content:
         cfg["key_content"] = key_content.replace("\\n", "\n")
     if key_file:
+        app_cfg = get_settings()
+        if app_cfg.app_env.lower() == "production" and not app_cfg.allow_oci_file_path_mode:
+            raise_production_block("oci_key_file", None)
         cfg["key_file"] = key_file
     if pass_phrase:
         cfg["pass_phrase"] = pass_phrase
     return cfg
+
+
+def _validate_runtime_path_mode(runtime_oci: dict[str, Any]) -> None:
+    app_cfg = get_settings()
+    if app_cfg.app_env.lower() != "production" or app_cfg.allow_oci_file_path_mode:
+        return
+    config_file = str((runtime_oci or {}).get("config_file") or "")
+    key_file = str((runtime_oci or {}).get("key_file") or "")
+    blocked_prefixes = ("/root/.oci", "~/.oci", "/home/app/.oci")
+    if config_file and (config_file.startswith("/") or config_file.startswith("~")):
+        raise_production_block("oci_config_file", None)
+    if key_file and (key_file.startswith("/") or key_file.startswith("~")):
+        raise_production_block("oci_key_file", None)
+    if any(config_file.startswith(p) for p in blocked_prefixes):
+        raise_production_block("oci_config_file", None)
+    if any(key_file.startswith(p) for p in blocked_prefixes):
+        raise_production_block("oci_key_file", None)

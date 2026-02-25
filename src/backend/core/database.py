@@ -81,6 +81,12 @@ def _ensure_settings_schema() -> None:
             statements.append("ALTER TABLE settings ADD COLUMN oci_key_content TEXT")
         if "oci_pass_phrase" not in existing:
             statements.append("ALTER TABLE settings ADD COLUMN oci_pass_phrase VARCHAR(512)")
+        if "oci_last_test_status" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN oci_last_test_status VARCHAR(32)")
+        if "oci_last_tested_at" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN oci_last_tested_at DATETIME")
+        if "oci_last_test_error" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN oci_last_test_error TEXT")
         if "important_compartment_ids" not in existing:
             statements.append("ALTER TABLE settings ADD COLUMN important_compartment_ids JSON")
         if "important_compartments" not in existing:

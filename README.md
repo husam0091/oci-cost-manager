@@ -41,6 +41,10 @@ docker compose up -d --build
 - `pgbouncer` (pooling)
 - `redis` (cache/queue)
 
+## Project Map
+
+- File-by-file guide: `PROJECT_STRUCTURE.md`
+
 ## Core API Endpoints
 
 - Health: `GET /api/v1/health`

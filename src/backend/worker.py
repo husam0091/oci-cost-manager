@@ -14,6 +14,7 @@ from core.models import JobRun, LogEvent, OciDiagnostics, Setting
 from core.redis_cache import cache_set
 from services.aggregate_engine import refresh_aggregates, refresh_snapshot
 from services.oci_client import OCIClientService
+from services.oci_credentials import get_oci_runtime_credentials
 from services.oci_diagnostics import compute_status
 from services.event_logger import audit_event, log_event, redact_sensitive
 
@@ -118,6 +119,13 @@ def _check_config_and_key(db: Session) -> tuple[bool, bool, str | None, str | No
     s = db.query(Setting).filter(Setting.id == 1).one_or_none()
     if not s:
         return False, False, None, None, {"code": "SettingsMissing", "message": "Settings row not found", "service": "config", "op": "load"}
+    app_env = (os.getenv("APP_ENV") or "development").lower()
+    if app_env == "production":
+        runtime = get_oci_runtime_credentials(db)
+        has_secure = bool((runtime.get("user") and runtime.get("tenancy") and runtime.get("fingerprint") and runtime.get("region")))
+        has_key = bool(runtime.get("key_content"))
+        return has_secure, has_key, None, None, {}
+
     config_file = (getattr(s, "oci_config_file", None) or os.getenv("OCI_CONFIG_FILE") or "/home/app/.oci/config")
     key_file = getattr(s, "oci_key_file", None)
     key_content = getattr(s, "oci_key_content", None)
@@ -173,7 +181,8 @@ def diagnostics_refresh(job_id: str, params: dict | None = None) -> dict:
                     # Minimal usage API check with bounded request object.
                     from datetime import timedelta
                     import oci
-                    end_time = datetime.now(UTC)
+                    # Usage API expects UTC timestamps aligned to whole-hour/day precision.
+                    end_time = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
                     start_time = end_time - timedelta(days=1)
                     req = oci.usage_api.models.RequestSummarizedUsagesDetails(
                         tenant_id=client.tenancy_id,

@@ -140,6 +140,7 @@ function AppLayout() {
   const [persona, setPersona] = useState(localStorage.getItem('ui_persona') || 'Executive');
   const [appVersion, setAppVersion] = useState('1.0.0');
   const [demoMode, setDemoMode] = useState(false);
+  const [toasts, setToasts] = useState([]);
 
   useEffect(() => {
     let mounted = true;
@@ -173,6 +174,19 @@ function AppLayout() {
     };
   }, []);
 
+  useEffect(() => {
+    const onApiError = (evt) => {
+      const detail = evt?.detail || {};
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setToasts((prev) => [...prev, { id, ...detail }].slice(-4));
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 7000);
+    };
+    window.addEventListener('app:api-error', onApiError);
+    return () => window.removeEventListener('app:api-error', onApiError);
+  }, []);
+
   const pageTitle = useMemo(() => {
     const match = navItems.find((item) => item.path === location.pathname);
     return match ? match.label : 'OCI Cost Manager';
@@ -202,6 +216,15 @@ function AppLayout() {
       <div className="mx-auto flex min-h-screen max-w-[1800px]">
         <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} profileName={profileName} persona={persona} />
         <main className="w-full flex-1">
+          <div className="fixed right-4 top-4 z-50 space-y-2">
+            {toasts.map((t) => (
+              <div key={t.id} className="max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 shadow">
+                <div className="font-medium">{t.code || 'API_ERROR'}</div>
+                <div>{t.message || 'Request failed'}</div>
+                {t.correlation_id ? <div className="mt-1 text-xs text-rose-700">Correlation: {t.correlation_id}</div> : null}
+              </div>
+            ))}
+          </div>
           <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 px-4 py-3 backdrop-blur lg:px-8">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
