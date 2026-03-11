@@ -41,10 +41,24 @@ def _safe_pct(value: float, base: float) -> float:
 
 def ensure_budget_tables(db: Session) -> None:
     try:
-        if db.bind is not None and db.bind.dialect.name != "sqlite":
-            return
+        dialect = db.bind.dialect.name if db.bind is not None else ""
     except Exception:
-        pass
+        dialect = ""
+
+    if dialect and dialect != "sqlite":
+        try:
+            cols = {c["name"] for c in inspect(db.bind).get_columns("budgets")}  # type: ignore[arg-type]
+            if "notifications_enabled" not in cols:
+                db.execute(text("ALTER TABLE budgets ADD COLUMN notifications_enabled BOOLEAN DEFAULT FALSE"))
+            if "start_date" not in cols:
+                db.execute(text("ALTER TABLE budgets ADD COLUMN start_date DATE"))
+            if "end_date" not in cols:
+                db.execute(text("ALTER TABLE budgets ADD COLUMN end_date DATE"))
+            db.commit()
+        except Exception:
+            db.rollback()
+        return
+
     db.execute(
         text(
             """
@@ -64,6 +78,8 @@ def ensure_budget_tables(db: Session) -> None:
                 enabled BOOLEAN NOT NULL DEFAULT 1,
                 notifications_enabled BOOLEAN NOT NULL DEFAULT 0,
                 owner VARCHAR(255) NOT NULL,
+                start_date DATE,
+                end_date DATE,
                 created_at DATETIME,
                 updated_at DATETIME
             )
@@ -110,6 +126,10 @@ def ensure_budget_tables(db: Session) -> None:
         cols = {c["name"] for c in inspect(db.bind).get_columns("budgets")}  # type: ignore[arg-type]
         if "notifications_enabled" not in cols:
             db.execute(text("ALTER TABLE budgets ADD COLUMN notifications_enabled BOOLEAN DEFAULT 0"))
+        if "start_date" not in cols:
+            db.execute(text("ALTER TABLE budgets ADD COLUMN start_date DATE"))
+        if "end_date" not in cols:
+            db.execute(text("ALTER TABLE budgets ADD COLUMN end_date DATE"))
     except Exception:
         pass
     db.commit()
@@ -390,7 +410,14 @@ def evaluate_budget_statuses(db: Session, *, persist_alerts: bool = True) -> lis
     except OperationalError:
         ensure_budget_tables(db)
         budgets = []
-    enabled = [b for b in budgets if b.enabled]
+    now_date = datetime.now(UTC).date()
+    enabled = [
+        b
+        for b in budgets
+        if b.enabled
+        and (getattr(b, "start_date", None) is None or b.start_date <= now_date)
+        and (getattr(b, "end_date", None) is None or b.end_date >= now_date)
+    ]
     if not enabled:
         return []
 

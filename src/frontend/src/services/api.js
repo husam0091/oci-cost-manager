@@ -4,7 +4,7 @@ const API_BASE = '/api/v1';
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 15000, // 15s timeout so UI doesn't hang
+  timeout: 30000, // 30s timeout to absorb cold-cache and proxy delays
   headers: {
     'Content-Type': 'application/json',
   },
@@ -102,22 +102,41 @@ api.interceptors.response.use(
     if (cid) localStorage.setItem(CORR_KEY, cid);
     return response;
   },
-  (error) => {
-    const url = error?.config?.url || '';
-    if (!url.includes('/logs/frontend')) {
+  async (error) => {
+    const config = error?.config || {};
+    const method = String(config?.method || 'get').toLowerCase();
+    const isTimeoutOrNetwork = error?.code === 'ECONNABORTED' || !error?.response;
+    const canRetry = method === 'get' && isTimeoutOrNetwork && !config.__retryOnce;
+
+    if (canRetry) {
+      config.__retryOnce = true;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      return api.request(config);
+    }
+
+    const url = config?.url || '';
+    const status = error?.response?.status;
+    const suppressAuthTransitionError = status === 401 && url.includes('/admin/logout');
+
+    if (!url.includes('/logs/frontend') && !suppressAuthTransitionError) {
       sendFrontendLog({
         level: 'error',
         message: 'api_request_failed',
         route: window.location.pathname,
         details: {
           url,
-          method: error?.config?.method,
-          status: error?.response?.status,
+          method,
+          status,
           data: error?.response?.data,
+          code: error?.code,
         },
       });
     }
-    emitGlobalApiError(error);
+
+    if (!suppressAuthTransitionError) {
+      emitGlobalApiError(error);
+    }
+
     return Promise.reject(error);
   },
 );
@@ -426,11 +445,11 @@ export const checkBudget = (budget, period = 'monthly') =>
   api.get('/budgets/check', { params: { budget, period } });
 export const getBudgetForecast = (budget, period = 'monthly') =>
   api.get('/budgets/forecast', { params: { budget, period } });
-export const listBudgets = () => api.get('/budgets');
+export const listBudgets = (config = {}) => api.get('/budgets', { timeout: config.timeout || 30000 });
 export const createBudget = (data) => api.post('/budgets', data);
 export const updateBudget = (budgetId, data) => api.put(`/budgets/${encodeURIComponent(budgetId)}`, data);
 export const deleteBudget = (budgetId) => api.delete(`/budgets/${encodeURIComponent(budgetId)}`);
-export const budgetStatus = () => api.get('/budgets/status');
+export const budgetStatus = (config = {}) => api.get('/budgets/status', { timeout: config.timeout || 45000 });
 export const budgetHistory = (budget_id) => api.get('/budgets/history', { params: { budget_id } });
 
 // Actions (Phase 5)
@@ -454,3 +473,10 @@ export const checkHealthReady = () => api.get('/health/ready');
 export const checkOCIHealth = () => api.get('/health/oci');
 
 export default api;
+
+export const adminGetPortalSslSettings = () => api.get('/settings/portal-ssl');
+export const adminUploadPortalSsl = (formData, config = {}) => api.post('/settings/portal-ssl/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: config.timeout || 90000 });
+
+export const adminListUsers = () => api.get('/admin/users');
+export const adminCreateUser = (data) => api.post('/admin/users', data);
+export const adminUpdateUser = (userId, data) => api.put(`/admin/users/${encodeURIComponent(userId)}`, data);

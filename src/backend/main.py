@@ -24,6 +24,7 @@ from api.routes import (
     ops,
     recommendations,
     settings_oci,
+    settings_ssl,
     insights,
     budgets,
     logs,
@@ -238,6 +239,11 @@ app.include_router(
     settings_oci.router,
     prefix=settings.api_prefix,
     tags=["SettingsOCI"],
+)
+app.include_router(
+    settings_ssl.router,
+    prefix=settings.api_prefix,
+    tags=["SettingsSSL"],
 )
 
 

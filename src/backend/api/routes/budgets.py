@@ -48,6 +48,8 @@ def _to_budget_model(row: Budget) -> BudgetModel:
         enabled=bool(row.enabled),
         notifications_enabled=bool(getattr(row, "notifications_enabled", False)),
         owner=row.owner,
+        start_date=row.start_date,
+        end_date=row.end_date,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -102,6 +104,8 @@ async def create_budget(
         enabled=bool(req.enabled),
         notifications_enabled=bool(req.notifications_enabled),
         owner=req.owner,
+        start_date=req.start_date,
+        end_date=req.end_date,
     )
     db.add(row)
     db.commit()
@@ -138,6 +142,8 @@ async def update_budget(
     row.enabled = bool(req.enabled)
     row.notifications_enabled = bool(req.notifications_enabled)
     row.owner = req.owner
+    row.start_date = req.start_date
+    row.end_date = req.end_date
     row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)

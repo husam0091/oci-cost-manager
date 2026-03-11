@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { costsBreakdownV2, costsMoversV2, dashboardSummaryV2, getMe } from '../services/api';
+import { parseBooleanFlag } from '../utils/flags';
 import { getDateRangeForPreset } from '../utils/dateRanges';
 import { UI_COPY } from '../constants/copy';
 import { useStaleSnapshotQuery } from '../hooks/useStaleSnapshotQuery';
@@ -167,7 +168,7 @@ function Dashboard({ persona = 'Executive' }) {
       .then((res) => {
         const data = res?.data?.data || {};
         setProductState(data.product_state || null);
-        setDemoMode(Boolean(data?.feature_flags?.enable_demo_mode));
+        setDemoMode(parseBooleanFlag(data?.feature_flags?.enable_demo_mode));
       })
       .catch(() => {
         setProductState(null);

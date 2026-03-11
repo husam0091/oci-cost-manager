@@ -61,6 +61,31 @@ class Setting(Base):
     enable_destructive_actions = Column(Boolean, nullable=False, default=False)
     enable_budget_auto_eval = Column(Boolean, nullable=False, default=True)
     enable_demo_mode = Column(Boolean, nullable=False, default=False)
+    portal_ssl_enabled = Column(Boolean, nullable=False, default=False)
+    portal_ssl_mode = Column(String(32), nullable=True)
+    portal_ssl_cert_path = Column(String(512), nullable=True)
+    portal_ssl_key_path = Column(String(512), nullable=True)
+    portal_ssl_chain_path = Column(String(512), nullable=True)
+    portal_ssl_subject = Column(String(512), nullable=True)
+    portal_ssl_issuer = Column(String(512), nullable=True)
+    portal_ssl_expires_at = Column(DateTime(timezone=True), nullable=True)
+    portal_ssl_updated_at = Column(DateTime(timezone=True), nullable=True)
+    portal_ssl_last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+
+
+class UserAccount(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(128), nullable=False, unique=True, index=True)
+    password_hash = Column(String(256), nullable=False, default="")
+    role = Column(String(32), nullable=False, default="viewer")  # admin|finops|engineer|viewer
+    allowed_teams = Column(JSON, nullable=True)
+    allowed_apps = Column(JSON, nullable=True)
+    allowed_envs = Column(JSON, nullable=True)
+    allowed_compartment_ids = Column(JSON, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
@@ -163,6 +188,8 @@ class Budget(Base):
     enabled = Column(Boolean, nullable=False, default=True)
     notifications_enabled = Column(Boolean, nullable=False, default=False)
     owner = Column(String(255), nullable=False)
+    start_date = Column(Date, nullable=True, index=True)
+    end_date = Column(Date, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

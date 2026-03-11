@@ -18,9 +18,9 @@ from openpyxl.styles import Font, PatternFill
 
 from core.database import ensure_settings_schema, get_db, SessionLocal
 from core.errors import raise_production_block
-from core.models import ActionEvent, ActionRequest, AllocationRule, BudgetAlertEvent, Compartment, Setting, ScanRun, Resource, CostSnapshot, TrendPoint
+from core.models import ActionEvent, ActionRequest, AllocationRule, BudgetAlertEvent, Compartment, Setting, ScanRun, Resource, CostSnapshot, TrendPoint, UserAccount
 from core.auth import verify_password, hash_password, create_access_token, decode_token
-from core.rbac import feature_flags
+from core.rbac import feature_flags, resolve_principal
 from core.scheduler import schedule_scan
 from core.config import get_settings as get_app_settings
 from services.scanner import run_full_scan
@@ -112,18 +112,36 @@ class ExportGenerateRequest(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "viewer"
+    allowed_teams: list[str] = Field(default_factory=list)
+    allowed_apps: list[str] = Field(default_factory=list)
+    allowed_envs: list[str] = Field(default_factory=list)
+    allowed_compartment_ids: list[str] = Field(default_factory=list)
+    is_active: bool = True
+
+
+class UserUpdateRequest(BaseModel):
+    password: Optional[str] = None
+    role: Optional[str] = None
+    allowed_teams: Optional[list[str]] = None
+    allowed_apps: Optional[list[str]] = None
+    allowed_envs: Optional[list[str]] = None
+    allowed_compartment_ids: Optional[list[str]] = None
+    is_active: Optional[bool] = None
+
+
 def _require_admin(token: Optional[str] = Cookie(default=None, alias="access_token"), db: Session = Depends(get_db)):
     ensure_settings_schema()
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    data = decode_token(token)
-    if not data or not data.get("sub"):
-        raise HTTPException(status_code=401, detail="Invalid token")
-    setting = db.query(Setting).filter(Setting.id == 1).one_or_none()
-    role = (getattr(setting, "user_role", "admin") or "admin").lower() if setting else "admin"
-    if role != "admin":
+    try:
+        principal = resolve_principal(db, token, strict=True)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    if principal.role != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
-    return data
+    return {"sub": principal.username}
 
 
 def _production_blocked_field(payload: BaseModel) -> Optional[str]:
@@ -142,18 +160,45 @@ def _production_blocked_field(payload: BaseModel) -> Optional[str]:
 
 @router.post("/login")
 async def login(req: LoginRequest, resp: Response, db: Session = Depends(get_db)):
+    username = (req.username or "").strip()
+    user = db.query(UserAccount).filter(UserAccount.username == username, UserAccount.is_active == True).one_or_none()
+    if user and verify_password(req.password, user.password_hash):
+        token = create_access_token(subject=user.username, expires_minutes=60)
+        resp.set_cookie(
+            "access_token",
+            token,
+            httponly=True,
+            samesite="lax",
+            max_age=3600,
+        )
+        return {"success": True}
+
+    # Backward compatibility with legacy settings admin login
     s = db.query(Setting).filter(Setting.id == 1).one_or_none()
-    if not s or not verify_password(req.password, s.password_hash) or req.username != s.username:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_access_token(subject=s.username, expires_minutes=60)
-    resp.set_cookie(
-        "access_token",
-        token,
-        httponly=True,
-        samesite="lax",
-        max_age=3600,
-    )
-    return {"success": True}
+    if s and username == s.username and verify_password(req.password, s.password_hash):
+        if not user:
+            db.add(UserAccount(
+                username=s.username,
+                password_hash=s.password_hash,
+                role=(s.user_role or "admin"),
+                allowed_teams=list(s.allowed_teams or []),
+                allowed_apps=list(s.allowed_apps or []),
+                allowed_envs=list(s.allowed_envs or []),
+                allowed_compartment_ids=list(s.allowed_compartment_ids or []),
+                is_active=True,
+            ))
+            db.commit()
+        token = create_access_token(subject=s.username, expires_minutes=60)
+        resp.set_cookie(
+            "access_token",
+            token,
+            httponly=True,
+            samesite="lax",
+            max_age=3600,
+        )
+        return {"success": True}
+
+    raise HTTPException(status_code=401, detail="Invalid credentials")
 
 
 @router.post("/logout")
@@ -1936,3 +1981,82 @@ async def generate_report(req: ExportGenerateRequest, db: Session = Depends(get_
             }
         },
     }
+
+
+@router.get("/users")
+async def list_users(db: Session = Depends(get_db), user=Depends(_require_admin)):
+    rows = db.query(UserAccount).order_by(UserAccount.username.asc()).all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": r.id,
+                "username": r.username,
+                "role": r.role,
+                "allowed_teams": list(r.allowed_teams or []),
+                "allowed_apps": list(r.allowed_apps or []),
+                "allowed_envs": list(r.allowed_envs or []),
+                "allowed_compartment_ids": list(r.allowed_compartment_ids or []),
+                "is_active": bool(r.is_active),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.post("/users")
+async def create_user(req: UserCreateRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
+    username = (req.username or "").strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="username is required")
+    if db.query(UserAccount).filter(UserAccount.username == username).one_or_none():
+        raise HTTPException(status_code=409, detail="username already exists")
+    role = (req.role or "viewer").strip().lower()
+    if role not in {"admin", "finops", "engineer", "viewer"}:
+        raise HTTPException(status_code=400, detail="invalid role")
+    row = UserAccount(
+        username=username,
+        password_hash=hash_password(req.password),
+        role=role,
+        allowed_teams=[x.strip() for x in (req.allowed_teams or []) if x and x.strip()],
+        allowed_apps=[x.strip() for x in (req.allowed_apps or []) if x and x.strip()],
+        allowed_envs=[x.strip() for x in (req.allowed_envs or []) if x and x.strip()],
+        allowed_compartment_ids=[x.strip() for x in (req.allowed_compartment_ids or []) if x and x.strip()],
+        is_active=bool(req.is_active),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "data": {"id": row.id, "username": row.username}}
+
+
+@router.put("/users/{user_id}")
+async def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
+    row = db.query(UserAccount).filter(UserAccount.id == user_id).one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="user not found")
+    if req.password:
+        row.password_hash = hash_password(req.password)
+    if req.role is not None:
+        role = (req.role or "").strip().lower()
+        if role not in {"admin", "finops", "engineer", "viewer"}:
+            raise HTTPException(status_code=400, detail="invalid role")
+        row.role = role
+    if req.allowed_teams is not None:
+        row.allowed_teams = [x.strip() for x in (req.allowed_teams or []) if x and x.strip()]
+    if req.allowed_apps is not None:
+        row.allowed_apps = [x.strip() for x in (req.allowed_apps or []) if x and x.strip()]
+    if req.allowed_envs is not None:
+        row.allowed_envs = [x.strip() for x in (req.allowed_envs or []) if x and x.strip()]
+    if req.allowed_compartment_ids is not None:
+        row.allowed_compartment_ids = [x.strip() for x in (req.allowed_compartment_ids or []) if x and x.strip()]
+    if req.is_active is not None:
+        if row.role == "admin" and req.is_active is False:
+            active_admins = db.query(UserAccount).filter(UserAccount.role == "admin", UserAccount.is_active == True).count()
+            if active_admins <= 1:
+                raise HTTPException(status_code=400, detail="cannot deactivate last active admin")
+        row.is_active = bool(req.is_active)
+    db.commit()
+    return {"success": True}

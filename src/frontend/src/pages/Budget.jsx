@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Plus, Save, Trash2 } from 'lucide-react';
 
 import { budgetHistory, budgetStatus, createAction, createBudget, deleteBudget, getMe, listBudgets, updateBudget } from '../services/api';
+import { parseBooleanFlag } from '../utils/flags';
 
 function money(v) {
   return `$${Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -26,6 +27,8 @@ const EMPTY_FORM = {
   enabled: true,
   notifications_enabled: false,
   owner: '',
+  start_date: '',
+  end_date: '',
 };
 
 function Budget() {
@@ -50,13 +53,30 @@ function Budget() {
   const load = async () => {
     try {
       setError('');
-      const [b, s] = await Promise.all([listBudgets(), budgetStatus()]);
-      setBudgets(b.data?.data || []);
-      setStatuses(s.data?.data || []);
-    } catch (e) {
-      setError(e?.response?.data?.detail || 'Failed to load budgets');
-      setBudgets([]);
-      setStatuses([]);
+      const [bRes, sRes] = await Promise.allSettled([
+        listBudgets({ timeout: 30000 }),
+        budgetStatus({ timeout: 45000 }),
+      ]);
+
+      const budgetErr = bRes.status === 'rejected' ? bRes.reason : null;
+      const statusErr = sRes.status === 'rejected' ? sRes.reason : null;
+
+      if (bRes.status === 'fulfilled') {
+        setBudgets(bRes.value?.data?.data || []);
+      } else {
+        setBudgets([]);
+      }
+
+      if (sRes.status === 'fulfilled') {
+        setStatuses(sRes.value?.data?.data || []);
+      } else {
+        setStatuses([]);
+      }
+
+      if (budgetErr || statusErr) {
+        const detail = budgetErr?.response?.data?.detail || statusErr?.response?.data?.detail;
+        setError(detail || 'Failed to load budgets (request timed out). Please retry.');
+      }
     } finally {
       setLoading(false);
     }
@@ -67,7 +87,7 @@ function Budget() {
     getMe()
       .then((res) => {
         setRole(res.data?.data?.role || 'admin');
-        setDemoMode(Boolean(res.data?.data?.feature_flags?.enable_demo_mode));
+        setDemoMode(parseBooleanFlag(res.data?.data?.feature_flags?.enable_demo_mode));
       })
       .catch(() => {
         setRole('admin');
@@ -91,9 +111,15 @@ function Budget() {
           .split(',')
           .map((x) => Number(x.trim()))
           .filter((x) => Number.isFinite(x)),
+        start_date: form.start_date || null,
+        end_date: form.end_date || null,
       };
       if (!payload.name || !payload.owner || !payload.limit_amount) {
         setError('Name, owner, and limit amount are required');
+        return;
+      }
+      if (payload.start_date && payload.end_date && payload.end_date < payload.start_date) {
+        setError('End date must be on or after start date');
         return;
       }
       if (editingId) {
@@ -125,6 +151,8 @@ function Budget() {
       enabled: Boolean(row.enabled),
       notifications_enabled: Boolean(row.notifications_enabled),
       owner: row.owner,
+      start_date: row.start_date || '',
+      end_date: row.end_date || '',
     });
   };
 
@@ -258,6 +286,20 @@ function Budget() {
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
             placeholder="Thresholds: 50,75,90,100"
           />
+          <input
+            type="date"
+            value={form.start_date}
+            onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            placeholder="Start date"
+          />
+          <input
+            type="date"
+            value={form.end_date}
+            onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            placeholder="End date"
+          />
           <select
             value={form.compare_mode}
             onChange={(e) => setForm((f) => ({ ...f, compare_mode: e.target.value }))}
@@ -342,6 +384,7 @@ function Budget() {
                         <td className="py-2">
                           <p className="font-medium text-slate-900">{b.name}</p>
                           <p className="text-xs text-slate-500">{b.owner}</p>
+                          <p className="text-xs text-slate-500">{b.start_date || 'No start'} → {b.end_date || 'No end'}</p>
                         </td>
                         <td className="py-2 text-slate-700">
                           {b.scope_type}: {b.scope_value}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getCostSummary, getCostBreakdown, getCostMovers } from '../services/api';
+import { getCostSummary, getCostBreakdown, getCostMovers, getDatabaseCosts } from '../services/api';
 import { getDateRangeForPreset, toIsoDate } from '../utils/dateRanges';
 import { UI_COPY } from '../constants/copy';
 import { useStaleSnapshotQuery } from '../hooks/useStaleSnapshotQuery';
@@ -58,18 +58,19 @@ function Costs() {
       return null;
     }
     const params = { start_date: range.start, end_date: range.end };
-    const [summaryRes, breakdownRes, moversRes, resourceRes, serviceRes] = await Promise.all([
+    const [summaryRes, breakdownRes, moversRes, resourceRes, dbRes] = await Promise.all([
       getCostSummary(params),
       getCostBreakdown({ ...params, group_by: groupBy, compare: 'previous', limit: 8, min_share_pct: 0.5 }),
       getCostMovers({ ...params, group_by: 'service', compare: 'previous', direction: 'up', limit: 10 }),
       getCostMovers({ ...params, group_by: 'resource', compare: 'previous', direction: 'both', limit: 10 }),
-      getCostBreakdown({ ...params, group_by: 'service', compare: 'previous', limit: 50, min_share_pct: 0 }),
+      getDatabaseCosts(params),
     ]);
-    const serviceRows = serviceRes.data?.data?.items || [];
+
+    const dbPayload = dbRes.data?.data || {};
     const dbCosts = {
-      oracle_db: { total: serviceRows.find((r) => String(r.name || r.service || '').toLowerCase().includes('oracle'))?.current || 0 },
-      mysql: { total: serviceRows.find((r) => String(r.name || r.service || '').toLowerCase().includes('mysql'))?.current || 0 },
-      sql_server: { total: serviceRows.find((r) => String(r.name || r.service || '').toLowerCase().includes('sql'))?.current || 0 },
+      oracle_db: { total: Number(dbPayload.oracle_db?.total || 0) },
+      mysql: { total: Number(dbPayload.mysql?.total || 0) },
+      sql_server: { total: Number(dbPayload.sql_server?.total || 0) },
     };
     return {
       summary: summaryRes.data?.data || null,

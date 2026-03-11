@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from core.config import get_settings as get_app_settings
 from core.database import ensure_settings_schema, get_db
 from core.models import Budget, ScanRun, Setting
-from core.rbac import feature_flags, resolve_principal
+from core.rbac import feature_flags, resolve_principal, role_job_profile
 
 router = APIRouter()
 
@@ -34,6 +34,7 @@ async def me(
         "data": {
             "username": principal.username,
             "role": principal.role,
+            "role_profile": role_job_profile(principal.role),
             "allowed_teams": principal.allowed_teams,
             "allowed_apps": principal.allowed_apps,
             "allowed_envs": principal.allowed_envs,

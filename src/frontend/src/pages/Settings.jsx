@@ -18,10 +18,17 @@ import {
   adminGetFeatureFlags,
   adminSetImportantCompartments,
   adminUpdateFeatureFlags,
+  adminListUsers,
+  adminCreateUser,
+  adminUpdateUser,
+  getDataResources,
   getDataCompartmentTree,
   saveOciSettings,
   uploadOciKey,
   testOciSettings,
+  getMe,
+  adminGetPortalSslSettings,
+  adminUploadPortalSsl,
 } from '../services/api';
 
 function Settings({ onAuthChange, forceLogin = false }) {
@@ -48,6 +55,15 @@ function Settings({ onAuthChange, forceLogin = false }) {
   const [selectedKeyFile, setSelectedKeyFile] = useState(null);
   const [uploadingKey, setUploadingKey] = useState(false);
   const [showAdvancedPem, setShowAdvancedPem] = useState(false);
+  const [portalSslInfo, setPortalSslInfo] = useState(null);
+  const [portalSslStatus, setPortalSslStatus] = useState(null);
+  const [portalCertFile, setPortalCertFile] = useState(null);
+  const [portalKeyFile, setPortalKeyFile] = useState(null);
+  const [portalIntermediateFile, setPortalIntermediateFile] = useState(null);
+  const [portalRootFile, setPortalRootFile] = useState(null);
+  const [portalPfxFile, setPortalPfxFile] = useState(null);
+  const [portalPfxPassword, setPortalPfxPassword] = useState('');
+  const [portalUploading, setPortalUploading] = useState(false);
 
   const [scanRuns, setScanRuns] = useState([]);
   const [scanRunning, setScanRunning] = useState(false);
@@ -68,11 +84,21 @@ function Settings({ onAuthChange, forceLogin = false }) {
   const [notificationsWebhookEnabled, setNotificationsWebhookEnabled] = useState(false);
   const [notificationsWebhookUrl, setNotificationsWebhookUrl] = useState('');
   const [notificationsWebhookDryRun, setNotificationsWebhookDryRun] = useState(true);
-  const [role, setRole] = useState('admin');
-  const [allowedTeams, setAllowedTeams] = useState('');
-  const [allowedApps, setAllowedApps] = useState('');
-  const [allowedEnvs, setAllowedEnvs] = useState('');
-  const [allowedCompartments, setAllowedCompartments] = useState('');
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userStatus, setUserStatus] = useState(null);
+  const [permissionOptions, setPermissionOptions] = useState({ teams: [], apps: [], envs: [], compartments: [] });
+  const [newUser, setNewUser] = useState({
+    username: '',
+    password: '',
+    role: 'viewer',
+    allowed_teams: [],
+    allowed_apps: [],
+    allowed_envs: [],
+    allowed_compartment_ids: [],
+    is_active: true,
+  });
+
   const [featureFlags, setFeatureFlags] = useState({
     enable_oci_executors: false,
     enable_destructive_actions: false,
@@ -86,43 +112,54 @@ function Settings({ onAuthChange, forceLogin = false }) {
 
   const checkLoginStatus = async () => {
     try {
-      const res = await adminGetSettings();
-      if (res.data.success) {
-        const data = res.data.data;
-        setIsLoggedIn(true);
-        setSettings(data);
-        setNewUsername(data.username || '');
-        setScanInterval(data.scan_interval_hours || 8);
-        setOciUser(data.oci_user || '');
-        setOciFingerprint(data.oci_fingerprint || '');
-        setOciTenancy(data.oci_tenancy || '');
-        setOciRegion(data.oci_region || '');
-        setOciLastTestStatus(data.oci_last_test_status || null);
-        setOciLastTestedAt(data.oci_last_tested_at || null);
-        setNotificationsEmailEnabled(Boolean(data.notifications_email_enabled));
-        setNotificationsSmtpHost(data.notifications_smtp_host || '');
-        setNotificationsSmtpPort(Number(data.notifications_smtp_port || 587));
-        setNotificationsSmtpUsername(data.notifications_smtp_username || '');
-        setNotificationsSmtpPassword(data.notifications_smtp_password || '');
-        setNotificationsEmailFrom(data.notifications_email_from || '');
-        setNotificationsEmailTo((data.notifications_email_to || []).join(','));
-        setNotificationsWebhookEnabled(Boolean(data.notifications_webhook_enabled));
-        setNotificationsWebhookUrl(data.notifications_webhook_url || '');
-        setNotificationsWebhookDryRun(Boolean(data.notifications_webhook_dry_run));
-        setRole(data.user_role || 'admin');
-        setAllowedTeams((data.allowed_teams || []).join(','));
-        setAllowedApps((data.allowed_apps || []).join(','));
-        setAllowedEnvs((data.allowed_envs || []).join(','));
-        setAllowedCompartments((data.allowed_compartment_ids || []).join(','));
-        try {
-          const ff = await adminGetFeatureFlags();
-          setFeatureFlags(ff.data?.data || featureFlags);
-        } catch {
-          // ignore
+      const meRes = await getMe();
+      const me = meRes.data?.data || {};
+      setIsLoggedIn(Boolean(meRes.data?.success));
+      if (onAuthChange) onAuthChange(Boolean(meRes.data?.success), me.username || 'user');
+
+      // Admin-only settings (best effort)
+      try {
+        const res = await adminGetSettings();
+        if (res.data.success) {
+          const data = res.data.data;
+          setSettings(data);
+          setNewUsername(data.username || '');
+          setScanInterval(data.scan_interval_hours || 8);
+          setOciUser(data.oci_user || '');
+          setOciFingerprint(data.oci_fingerprint || '');
+          setOciTenancy(data.oci_tenancy || '');
+          setOciRegion(data.oci_region || '');
+          setOciLastTestStatus(data.oci_last_test_status || null);
+          setOciLastTestedAt(data.oci_last_tested_at || null);
+          setNotificationsEmailEnabled(Boolean(data.notifications_email_enabled));
+          setNotificationsSmtpHost(data.notifications_smtp_host || '');
+          setNotificationsSmtpPort(Number(data.notifications_smtp_port || 587));
+          setNotificationsSmtpUsername(data.notifications_smtp_username || '');
+          setNotificationsSmtpPassword(data.notifications_smtp_password || '');
+          setNotificationsEmailFrom(data.notifications_email_from || '');
+          setNotificationsEmailTo((data.notifications_email_to || []).join(','));
+          setNotificationsWebhookEnabled(Boolean(data.notifications_webhook_enabled));
+          setNotificationsWebhookUrl(data.notifications_webhook_url || '');
+          setNotificationsWebhookDryRun(Boolean(data.notifications_webhook_dry_run));
+          try {
+            const ff = await adminGetFeatureFlags();
+            setFeatureFlags(ff.data?.data || featureFlags);
+          } catch {
+            // ignore
+          }
+          try {
+            const ssl = await adminGetPortalSslSettings();
+            setPortalSslInfo(ssl.data?.data || null);
+          } catch {
+            setPortalSslInfo(null);
+          }
+          loadScanRuns();
+          loadImportantCompartments();
+          loadUsers();
+          loadPermissionOptions();
         }
-        if (onAuthChange) onAuthChange(true, data.username || 'admin');
-        loadScanRuns();
-        loadImportantCompartments();
+      } catch {
+        // Non-admin user: authenticated but admin settings not available
       }
     } catch {
       setIsLoggedIn(false);
@@ -171,6 +208,76 @@ function Settings({ onAuthChange, forceLogin = false }) {
     }
   };
 
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const res = await adminListUsers();
+      setUsers(res.data?.data || []);
+    } catch {
+      setUsers([]);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const loadPermissionOptions = async () => {
+    try {
+      const [resRows, treeRes] = await Promise.all([
+        getDataResources({ limit: 1000 }),
+        getDataCompartmentTree(),
+      ]);
+      const rows = resRows.data?.data || [];
+      const teams = Array.from(new Set(rows.map((r) => r.team).filter(Boolean).filter((x) => x !== 'Unallocated'))).sort();
+      const apps = Array.from(new Set(rows.map((r) => r.app).filter(Boolean).filter((x) => x !== 'Unallocated'))).sort();
+      const envs = Array.from(new Set(rows.map((r) => r.env).filter(Boolean).filter((x) => x !== 'Unallocated'))).sort();
+      const flatten = (node, acc = []) => {
+        if (!node) return acc;
+        acc.push({ id: node.id, name: node.name });
+        (node.children || []).forEach((child) => flatten(child, acc));
+        return acc;
+      };
+      const compartments = flatten(treeRes.data?.data || null, []);
+      setPermissionOptions({ teams, apps, envs, compartments });
+    } catch {
+      setPermissionOptions({ teams: [], apps: [], envs: [], compartments: [] });
+    }
+  };
+
+  const toggleUserScope = (field, value) => {
+    setNewUser((u) => {
+      const arr = new Set(u[field] || []);
+      if (arr.has(value)) arr.delete(value); else arr.add(value);
+      return { ...u, [field]: Array.from(arr) };
+    });
+  };
+
+  const createUser = async () => {
+    setUserStatus(null);
+    if (!newUser.username || !newUser.password) {
+      setUserStatus({ type: 'error', text: 'Username and password are required' });
+      return;
+    }
+    try {
+      await adminCreateUser(newUser);
+      setUserStatus({ type: 'success', text: 'User created successfully' });
+      setNewUser({ username: '', password: '', role: 'viewer', allowed_teams: [], allowed_apps: [], allowed_envs: [], allowed_compartment_ids: [], is_active: true });
+      await loadUsers();
+    } catch (err) {
+      setUserStatus({ type: 'error', text: err.response?.data?.detail || 'Failed to create user' });
+    }
+  };
+
+  const updateUser = async (id, patch) => {
+    setUserStatus(null);
+    try {
+      await adminUpdateUser(id, patch);
+      setUserStatus({ type: 'success', text: 'User updated' });
+      await loadUsers();
+    } catch (err) {
+      setUserStatus({ type: 'error', text: err.response?.data?.detail || 'Failed to update user' });
+    }
+  };
+
   const loadScanRuns = async () => {
     try {
       const res = await adminGetScanRuns();
@@ -191,11 +298,6 @@ function Settings({ onAuthChange, forceLogin = false }) {
       notifications_webhook_enabled: notificationsWebhookEnabled,
       notifications_webhook_url: notificationsWebhookUrl,
       notifications_webhook_dry_run: notificationsWebhookDryRun,
-      user_role: role,
-      allowed_teams: allowedTeams.split(',').map((x) => x.trim()).filter(Boolean),
-      allowed_apps: allowedApps.split(',').map((x) => x.trim()).filter(Boolean),
-      allowed_envs: allowedEnvs.split(',').map((x) => x.trim()).filter(Boolean),
-      allowed_compartment_ids: allowedCompartments.split(',').map((x) => x.trim()).filter(Boolean),
       enable_oci_executors: featureFlags.enable_oci_executors,
       enable_destructive_actions: featureFlags.enable_destructive_actions,
       enable_budget_auto_eval: featureFlags.enable_budget_auto_eval,
@@ -219,9 +321,17 @@ function Settings({ onAuthChange, forceLogin = false }) {
   };
 
   const handleLogout = async () => {
-    await adminLogout();
-    setIsLoggedIn(false);
-    if (onAuthChange) onAuthChange(false);
+    try {
+      await adminLogout();
+    } catch (err) {
+      // If session already expired, still force local logout state.
+      if (err?.response?.status && err.response.status !== 401) {
+        throw err;
+      }
+    } finally {
+      setIsLoggedIn(false);
+      if (onAuthChange) onAuthChange(false);
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -281,6 +391,35 @@ function Settings({ onAuthChange, forceLogin = false }) {
     }
   };
 
+  const handleUploadPortalSsl = async () => {
+    setPortalSslStatus(null);
+    setPortalUploading(true);
+    try {
+      const form = new FormData();
+      if (portalPfxFile) {
+        form.append('pfx_file', portalPfxFile);
+        if (portalPfxPassword) form.append('pfx_password', portalPfxPassword);
+      } else {
+        if (!portalCertFile || !portalKeyFile) {
+          setPortalSslStatus({ type: 'error', text: 'Provide cert + key files, or upload a .pfx file.' });
+          setPortalUploading(false);
+          return;
+        }
+        form.append('cert_file', portalCertFile);
+        form.append('key_file', portalKeyFile);
+        if (portalIntermediateFile) form.append('intermediate_file', portalIntermediateFile);
+        if (portalRootFile) form.append('root_file', portalRootFile);
+      }
+      const res = await adminUploadPortalSsl(form);
+      setPortalSslInfo(res.data?.data || null);
+      setPortalSslStatus({ type: 'success', text: 'Certificate uploaded. Reload nginx to apply on port 443.' });
+    } catch (err) {
+      setPortalSslStatus({ type: 'error', text: err.response?.data?.detail || 'Failed to upload SSL certificate' });
+    } finally {
+      setPortalUploading(false);
+    }
+  };
+
   const handleRunScan = async () => {
     if (ociTestStatus?.type !== 'success') return;
     setScanRunning(true);
@@ -311,8 +450,8 @@ function Settings({ onAuthChange, forceLogin = false }) {
             <div><h1 className="text-xl font-bold text-slate-900">Admin Login</h1></div>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
-            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2" placeholder="Username" required />
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2" placeholder="Password" required />
+            <input id="login-username" name="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2" placeholder="Username" required />
+            <input id="login-password" name="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2" placeholder="Password" required />
             {loginError && <div className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{loginError}</div>}
             <button type="submit" disabled={loginLoading} className="w-full rounded-lg bg-cyan-600 px-4 py-2 font-medium text-white">
               {loginLoading ? 'Signing in...' : 'Sign In'}
@@ -339,9 +478,10 @@ function Settings({ onAuthChange, forceLogin = false }) {
       </div>
 
       <div className="rounded-2xl border border-white/60 bg-white/90 p-2 shadow-lg">
-        <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+        <div className="grid grid-cols-3 gap-2 rounded-xl bg-slate-100 p-1">
           <button className={tabClass('integration')} onClick={() => setActiveTab('integration')}>Integration</button>
           <button className={tabClass('operations')} onClick={() => setActiveTab('operations')}>Operations</button>
+          <button className={tabClass('users')} onClick={() => setActiveTab('users')}>Users</button>
         </div>
       </div>
 
@@ -350,22 +490,15 @@ function Settings({ onAuthChange, forceLogin = false }) {
           <div className="rounded-2xl border border-white/60 bg-white/90 p-5 shadow-lg 2xl:col-span-1">
             <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900"><ShieldCheck size={18} className="text-cyan-700" />Admin Access</h3>
             <div className="space-y-3">
-              <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Username" />
-              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="New password (optional)" />
+              <input name="settings-username" type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Username" />
+              <input name="settings-new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="New password (optional)" />
               <select value={scanInterval} onChange={(e) => setScanInterval(parseInt(e.target.value, 10))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
                 <option value={1}>Every 1 hour</option><option value={2}>Every 2 hours</option><option value={4}>Every 4 hours</option>
                 <option value={6}>Every 6 hours</option><option value={8}>Every 8 hours</option><option value={12}>Every 12 hours</option><option value={24}>Every 24 hours</option>
               </select>
-              <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                <option value="admin">admin</option>
-                <option value="finops">finops</option>
-                <option value="engineer">engineer</option>
-                <option value="viewer">viewer</option>
-              </select>
-              <input type="text" value={allowedTeams} onChange={(e) => setAllowedTeams(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Allowed teams (comma-separated)" />
-              <input type="text" value={allowedApps} onChange={(e) => setAllowedApps(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Allowed apps (comma-separated)" />
-              <input type="text" value={allowedEnvs} onChange={(e) => setAllowedEnvs(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Allowed envs (comma-separated)" />
-              <input type="text" value={allowedCompartments} onChange={(e) => setAllowedCompartments(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Allowed compartment IDs (comma-separated)" />
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                User role and scope permissions are managed in the <span className="font-semibold">Users</span> tab with checkbox-based controls.
+              </div>
             </div>
           </div>
 
@@ -373,10 +506,10 @@ function Settings({ onAuthChange, forceLogin = false }) {
             <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900"><ServerCog size={18} className="text-cyan-700" />OCI SDK Integration</h3>
             <p className="mb-3 text-xs text-slate-500">Private keys are never displayed or returned after upload.</p>
             <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <input type="text" value={ociUser} onChange={(e) => setOciUser(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="User OCID" />
-              <input type="text" value={ociFingerprint} onChange={(e) => setOciFingerprint(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Fingerprint" />
-              <input type="text" value={ociTenancy} onChange={(e) => setOciTenancy(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Tenancy OCID" />
-              <input type="text" value={ociRegion} onChange={(e) => setOciRegion(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Region" />
+              <input name="oci-user-ocid" type="text" value={ociUser} onChange={(e) => setOciUser(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="User OCID" />
+              <input name="oci-fingerprint" type="text" value={ociFingerprint} onChange={(e) => setOciFingerprint(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Fingerprint" />
+              <input name="oci-tenancy-ocid" type="text" value={ociTenancy} onChange={(e) => setOciTenancy(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Tenancy OCID" />
+              <input name="oci-region" type="text" value={ociRegion} onChange={(e) => setOciRegion(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Region" />
             </div>
             <div className="mb-4 rounded-xl border border-slate-200 p-4">
               <h4 className="mb-2 text-sm font-semibold text-slate-800">Private Key Upload</h4>
@@ -412,12 +545,12 @@ function Settings({ onAuthChange, forceLogin = false }) {
                   <input type="checkbox" checked={notificationsWebhookEnabled} onChange={(e) => setNotificationsWebhookEnabled(e.target.checked)} />
                   Enable Webhook
                 </label>
-                <input type="text" value={notificationsSmtpHost} onChange={(e) => setNotificationsSmtpHost(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="SMTP host" />
-                <input type="number" value={notificationsSmtpPort} onChange={(e) => setNotificationsSmtpPort(parseInt(e.target.value || '587', 10))} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="SMTP port" />
-                <input type="text" value={notificationsSmtpUsername} onChange={(e) => setNotificationsSmtpUsername(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="SMTP username" />
-                <input type="password" value={notificationsSmtpPassword} onChange={(e) => setNotificationsSmtpPassword(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="SMTP password" />
-                <input type="text" value={notificationsEmailFrom} onChange={(e) => setNotificationsEmailFrom(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Email from" />
-                <input type="text" value={notificationsEmailTo} onChange={(e) => setNotificationsEmailTo(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Email to (comma-separated)" />
+                <input name="smtp-host" type="text" value={notificationsSmtpHost} onChange={(e) => setNotificationsSmtpHost(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="SMTP host" />
+                <input name="smtp-port" type="number" value={notificationsSmtpPort} onChange={(e) => setNotificationsSmtpPort(parseInt(e.target.value || '587', 10))} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="SMTP port" />
+                <input name="smtp-username" type="text" value={notificationsSmtpUsername} onChange={(e) => setNotificationsSmtpUsername(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="SMTP username" />
+                <input name="smtp-password" type="password" value={notificationsSmtpPassword} onChange={(e) => setNotificationsSmtpPassword(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="SMTP password" />
+                <input name="email-from" type="text" value={notificationsEmailFrom} onChange={(e) => setNotificationsEmailFrom(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Email from" />
+                <input name="email-to" type="text" value={notificationsEmailTo} onChange={(e) => setNotificationsEmailTo(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Email to (comma-separated)" />
                 <input type="text" value={notificationsWebhookUrl} onChange={(e) => setNotificationsWebhookUrl(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm md:col-span-2" placeholder="Webhook URL (Slack/Teams compatible)" />
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700 md:col-span-2">
                   <input type="checkbox" checked={notificationsWebhookDryRun} onChange={(e) => setNotificationsWebhookDryRun(e.target.checked)} />
@@ -425,6 +558,34 @@ function Settings({ onAuthChange, forceLogin = false }) {
                 </label>
               </div>
             </div>
+
+            <div className="mt-6 rounded-xl border border-slate-200 p-4">
+              <h4 className="mb-3 text-sm font-semibold text-slate-800">Portal SSL (HTTPS / 443)</h4>
+              <p className="mb-3 text-xs text-slate-500">Upload either a PKCS#12 file (.pfx/.p12) or PEM files (.crt/.pem + .key). Optional intermediate/root certs will be appended into full chain.</p>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <input type="file" accept=".pfx,.p12" onChange={(e) => setPortalPfxFile(e.target.files?.[0] || null)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input type="password" value={portalPfxPassword} onChange={(e) => setPortalPfxPassword(e.target.value)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="PFX password (optional)" />
+                <input type="file" accept=".crt,.cer,.pem" onChange={(e) => setPortalCertFile(e.target.files?.[0] || null)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input type="file" accept=".key,.pem" onChange={(e) => setPortalKeyFile(e.target.files?.[0] || null)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input type="file" accept=".crt,.cer,.pem" onChange={(e) => setPortalIntermediateFile(e.target.files?.[0] || null)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input type="file" accept=".crt,.cer,.pem" onChange={(e) => setPortalRootFile(e.target.files?.[0] || null)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div className="mt-3">
+                <button onClick={handleUploadPortalSsl} disabled={portalUploading} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">{portalUploading ? 'Uploading...' : 'Upload SSL Certificate'}</button>
+              </div>
+              {portalSslInfo ? (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                  <div><span className="font-semibold">Enabled:</span> {String(Boolean(portalSslInfo.enabled))}</div>
+                  <div><span className="font-semibold">Mode:</span> {portalSslInfo.mode || '-'}</div>
+                  <div><span className="font-semibold">Subject:</span> {portalSslInfo.subject || '-'}</div>
+                  <div><span className="font-semibold">Issuer:</span> {portalSslInfo.issuer || '-'}</div>
+                  <div><span className="font-semibold">Expires:</span> {portalSslInfo.expires_at ? new Date(portalSslInfo.expires_at).toLocaleString() : '-'}</div>
+                  <div><span className="font-semibold">Reload:</span> {portalSslInfo.reload_hint || 'sudo nginx -t && sudo systemctl reload nginx'}</div>
+                </div>
+              ) : null}
+              {portalSslStatus ? <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${portalSslStatus.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{portalSslStatus.text}</div> : null}
+            </div>
+
             <div className="mt-6 rounded-xl border border-slate-200 p-4">
               <h4 className="mb-3 text-sm font-semibold text-slate-800">Feature Flags</h4>
               <div className="grid grid-cols-1 gap-2">
@@ -540,6 +701,90 @@ function Settings({ onAuthChange, forceLogin = false }) {
           </div>
         </div>
       )}
+
+
+      {activeTab === 'users' && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-white/60 bg-white/90 p-6 shadow-lg">
+            <h3 className="mb-4 text-lg font-semibold text-slate-900">Create User</h3>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <input name="new-user-username" type="text" value={newUser.username} onChange={(e) => setNewUser((u) => ({ ...u, username: e.target.value }))} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Username" />
+              <input name="new-user-password" type="password" value={newUser.password} onChange={(e) => setNewUser((u) => ({ ...u, password: e.target.value }))} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Password" />
+              <select value={newUser.role} onChange={(e) => setNewUser((u) => ({ ...u, role: e.target.value }))} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <option value="admin">admin</option>
+                <option value="finops">finops</option>
+                <option value="engineer">engineer</option>
+                <option value="viewer">viewer</option>
+              </select>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-medium text-slate-800">Allowed Teams</p>
+                <div className="max-h-32 space-y-1 overflow-auto">
+                  {permissionOptions.teams.map((x) => (
+                    <label key={x} className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={newUser.allowed_teams.includes(x)} onChange={() => toggleUserScope('allowed_teams', x)} />{x}</label>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-medium text-slate-800">Allowed Apps</p>
+                <div className="max-h-32 space-y-1 overflow-auto">
+                  {permissionOptions.apps.map((x) => (
+                    <label key={x} className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={newUser.allowed_apps.includes(x)} onChange={() => toggleUserScope('allowed_apps', x)} />{x}</label>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-medium text-slate-800">Allowed Environments</p>
+                <div className="max-h-32 space-y-1 overflow-auto">
+                  {permissionOptions.envs.map((x) => (
+                    <label key={x} className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={newUser.allowed_envs.includes(x)} onChange={() => toggleUserScope('allowed_envs', x)} />{x}</label>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="mb-2 text-sm font-medium text-slate-800">Allowed Compartments</p>
+                <div className="max-h-32 space-y-1 overflow-auto">
+                  {permissionOptions.compartments.map((c) => (
+                    <label key={c.id} className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={newUser.allowed_compartment_ids.includes(c.id)} onChange={() => toggleUserScope('allowed_compartment_ids', c.id)} />{c.name}</label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex items-center gap-3">
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={newUser.is_active} onChange={(e) => setNewUser((u) => ({ ...u, is_active: e.target.checked }))} />Active</label>
+              <button onClick={createUser} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white">Create User</button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/60 bg-white/90 p-6 shadow-lg">
+            <h3 className="mb-4 text-lg font-semibold text-slate-900">Users</h3>
+            {usersLoading ? <p className="text-sm text-slate-500">Loading users...</p> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b border-slate-200"><th className="px-3 py-2 text-left">Username</th><th className="px-3 py-2 text-left">Role</th><th className="px-3 py-2 text-left">Active</th><th className="px-3 py-2 text-left">Scopes</th></tr></thead>
+                  <tbody>
+                    {users.map((u) => (
+                      <tr key={u.id} className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-medium">{u.username}</td>
+                        <td className="px-3 py-2">
+                          <select value={u.role} onChange={(e) => updateUser(u.id, { role: e.target.value })} className="rounded border border-slate-300 px-2 py-1 text-xs">
+                            <option value="admin">admin</option><option value="finops">finops</option><option value="engineer">engineer</option><option value="viewer">viewer</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2"><input type="checkbox" checked={Boolean(u.is_active)} onChange={(e) => updateUser(u.id, { is_active: e.target.checked })} /></td>
+                        <td className="px-3 py-2 text-xs text-slate-600">teams:{(u.allowed_teams || []).length} apps:{(u.allowed_apps || []).length} envs:{(u.allowed_envs || []).length} comps:{(u.allowed_compartment_ids || []).length}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {userStatus ? <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${userStatus.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{userStatus.text}</div> : null}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -28,6 +28,8 @@ class BudgetModel(BaseModel):
     enabled: bool = True
     notifications_enabled: bool = False
     owner: str
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     created_at: datetime
     updated_at: datetime
 
@@ -47,6 +49,8 @@ class BudgetCreateUpdateModel(BaseModel):
     enabled: bool = True
     notifications_enabled: bool = False
     owner: str
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
 
     @model_validator(mode="after")
     def validate_scope(self) -> "BudgetCreateUpdateModel":
@@ -58,6 +62,8 @@ class BudgetCreateUpdateModel(BaseModel):
         self.alert_thresholds = [x for x in cleaned if 1 <= x <= 200]
         if not self.alert_thresholds:
             self.alert_thresholds = [50, 75, 90, 100]
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
         return self
 
 

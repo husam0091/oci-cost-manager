@@ -9,7 +9,58 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from core.auth import get_secret_key
-from core.models import Setting
+from core.models import Setting, UserAccount
+
+
+ROLE_JOB_PROFILES = {
+    "admin": {
+        "title": "Platform Administrator",
+        "description": "Owns platform configuration, identity scope, and operational guardrails.",
+        "permissions": [
+            "Manage integration settings and credentials",
+            "Manage SSL certificate settings",
+            "Run scans and operational jobs",
+            "Create/approve/run all actions",
+            "Manage budgets and governance settings",
+            "Set role scope boundaries",
+        ],
+    },
+    "finops": {
+        "title": "FinOps Analyst",
+        "description": "Drives cost optimization within assigned scope with safe operational changes.",
+        "permissions": [
+            "View all analytics within assigned scope",
+            "Create actions and recommendations",
+            "Approve/run only safe actions",
+            "Manage budgets within scope",
+            "Cannot change platform/integration/SSL settings",
+        ],
+    },
+    "engineer": {
+        "title": "Engineering Operator",
+        "description": "Reviews workload-level optimization opportunities and execution details.",
+        "permissions": [
+            "View resources/costs/recommendations within assigned scope",
+            "Create actions within assigned scope",
+            "Cannot approve/run actions",
+            "Cannot modify platform settings",
+        ],
+    },
+    "viewer": {
+        "title": "Read-only Stakeholder",
+        "description": "Consumes reports and operational insights without making changes.",
+        "permissions": [
+            "Read-only access to dashboards/reports within scope",
+            "No action creation or execution",
+            "No settings updates",
+        ],
+    },
+}
+
+
+def role_job_profile(role: str) -> dict[str, Any]:
+    key = (role or "viewer").lower()
+    return ROLE_JOB_PROFILES.get(key, ROLE_JOB_PROFILES["viewer"])
 
 
 @dataclass
@@ -31,6 +82,17 @@ def _decode_token(token: str) -> Optional[dict]:
         return jwt.decode(token, get_secret_key(), algorithms=["HS256"])
     except JWTError:
         return None
+
+
+def principal_from_user(user: UserAccount) -> Principal:
+    return Principal(
+        username=user.username,
+        role=(user.role or "viewer").lower(),
+        allowed_teams=list(user.allowed_teams or []),
+        allowed_apps=list(user.allowed_apps or []),
+        allowed_envs=list(user.allowed_envs or []),
+        allowed_compartment_ids=list(user.allowed_compartment_ids or []),
+    )
 
 
 def principal_from_setting(setting: Optional[Setting]) -> Principal:
@@ -64,6 +126,7 @@ def resolve_principal(db: Session, token: Optional[str], *, strict: bool = False
             setting = None
     except Exception:
         setting = None
+
     default_principal = principal_from_setting(setting)
     if not token:
         if strict:
@@ -71,10 +134,25 @@ def resolve_principal(db: Session, token: Optional[str], *, strict: bool = False
         return default_principal
 
     payload = _decode_token(token)
-    if not payload or not payload.get("sub"):
+    username = (payload or {}).get("sub")
+    if not username:
         if strict:
             raise PermissionError("Invalid token")
         return default_principal
+
+    try:
+        user = db.query(UserAccount).filter(UserAccount.username == username, UserAccount.is_active == True).one_or_none()
+    except Exception:
+        user = None
+
+    if user:
+        return principal_from_user(user)
+
+    if setting and username == setting.username:
+        return default_principal
+
+    if strict:
+        raise PermissionError("User not found or inactive")
     return default_principal
 
 

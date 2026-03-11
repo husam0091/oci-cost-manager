@@ -4,7 +4,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
 
 from core.database import SessionLocal
-from core.models import Setting
+from core.models import Setting, UserAccount
 from services.scanner import run_full_scan
 
 _scheduler: BackgroundScheduler | None = None
@@ -33,6 +33,20 @@ def ensure_default_settings(db: Session):
             oci_config_file=cfg.oci_config_file,
         )
         db.add(s); db.commit()
+
+    existing_admin = db.query(UserAccount).filter(UserAccount.username == s.username).one_or_none()
+    if not existing_admin:
+        db.add(UserAccount(
+            username=s.username,
+            password_hash=s.password_hash,
+            role=(s.user_role or "admin"),
+            allowed_teams=list(s.allowed_teams or []),
+            allowed_apps=list(s.allowed_apps or []),
+            allowed_envs=list(s.allowed_envs or []),
+            allowed_compartment_ids=list(s.allowed_compartment_ids or []),
+            is_active=True,
+        ))
+        db.commit()
 
 
 def schedule_scan():

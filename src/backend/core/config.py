@@ -43,6 +43,9 @@ class Settings(BaseSettings):
 
     # Exports
     export_dir: str = "/data/exports"
+
+    # Portal SSL
+    portal_ssl_dir: str = "/app/portal-ssl"
     
     model_config = SettingsConfigDict(
         env_file=".env",

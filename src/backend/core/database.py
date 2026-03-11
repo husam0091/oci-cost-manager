@@ -131,6 +131,26 @@ def _ensure_settings_schema() -> None:
             statements.append("ALTER TABLE settings ADD COLUMN enable_budget_auto_eval BOOLEAN DEFAULT 1")
         if "enable_demo_mode" not in existing:
             statements.append("ALTER TABLE settings ADD COLUMN enable_demo_mode BOOLEAN DEFAULT 0")
+        if "portal_ssl_enabled" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_enabled BOOLEAN DEFAULT 0")
+        if "portal_ssl_mode" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_mode VARCHAR(32)")
+        if "portal_ssl_cert_path" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_cert_path VARCHAR(512)")
+        if "portal_ssl_key_path" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_key_path VARCHAR(512)")
+        if "portal_ssl_chain_path" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_chain_path VARCHAR(512)")
+        if "portal_ssl_subject" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_subject VARCHAR(512)")
+        if "portal_ssl_issuer" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_issuer VARCHAR(512)")
+        if "portal_ssl_expires_at" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_expires_at TIMESTAMP")
+        if "portal_ssl_updated_at" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_updated_at TIMESTAMP")
+        if "portal_ssl_last_error" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN portal_ssl_last_error TEXT")
 
         if statements:
             with engine.begin() as conn:

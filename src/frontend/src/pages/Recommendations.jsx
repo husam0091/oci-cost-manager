@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 import { createAction, getMe, recommendationById, recommendationsList, recommendationsSummary } from '../services/api';
+import { parseBooleanFlag } from '../utils/flags';
 import { getDateRangeForPreset } from '../utils/dateRanges';
 import { UI_COPY } from '../constants/copy';
 
@@ -73,7 +74,7 @@ function Recommendations() {
     getMe()
       .then((res) => {
         setRole(res.data?.data?.role || 'admin');
-        setDemoMode(Boolean(res.data?.data?.feature_flags?.enable_demo_mode));
+        setDemoMode(parseBooleanFlag(res.data?.data?.feature_flags?.enable_demo_mode));
       })
       .catch(() => {
         setRole('admin');

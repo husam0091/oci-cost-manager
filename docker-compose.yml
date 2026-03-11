@@ -54,6 +54,8 @@ services:
       context: ./src/backend
       dockerfile: Dockerfile
     container_name: oci-cost-manager-backend
+    env_file:
+      - ./deploy/.env.production
     expose:
       - "8000"
     environment:
@@ -73,8 +75,10 @@ services:
       CACHE_TTL_PRICES: "86400"
       CORS_ORIGINS: '["http://localhost:8080","http://localhost:3000","http://localhost:5173"]'
       EXPORT_DIR: "/exports"
+      PORTAL_SSL_DIR: "/app/portal-ssl"
     volumes:
-      - ${OCI_CONFIG_DIR:-C:/Users/hosam/.oci}:/home/app/.oci:ro
+      - ${OCI_CONFIG_DIR:-/etc/oci-cost-manager/oci}:/home/app/.oci:ro
+      - /etc/oci-cost-manager/ssl:/app/portal-ssl
       - ../y/reports:/exports
     depends_on:
       pgbouncer:
@@ -90,6 +94,8 @@ services:
       context: ./src/backend
       dockerfile: Dockerfile
     container_name: oci-cost-manager-worker
+    env_file:
+      - ./deploy/.env.production
     command: ["bash", "-lc", "celery -A worker.celery_app worker -Q default,heavy -l INFO"]
     environment:
       DATABASE_URL: "postgresql+psycopg://ocicost_user:${POSTGRES_PASSWORD:-change_me_strong}@pgbouncer:5432/ocicost"
@@ -99,7 +105,7 @@ services:
       OCI_CONFIG_FILE: "/home/app/.oci/config"
       OCI_CONFIG_PROFILE: "DEFAULT"
     volumes:
-      - ${OCI_CONFIG_DIR:-C:/Users/hosam/.oci}:/home/app/.oci:ro
+      - ${OCI_CONFIG_DIR:-/etc/oci-cost-manager/oci}:/home/app/.oci:ro
     depends_on:
       backend:
         condition: service_started

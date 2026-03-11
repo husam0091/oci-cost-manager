@@ -20,13 +20,14 @@ import Resources from './pages/Resources';
 import Costs from './pages/Costs';
 import Budget from './pages/Budget';
 import Settings from './pages/Settings';
+import { parseBooleanFlag } from './utils/flags';
 import ExportReports from './pages/ExportReports';
 import Governance from './pages/Governance';
 import Recommendations from './pages/Recommendations';
 import Actions from './pages/Actions';
 import Logs from './pages/Logs';
 import GlobalStatusBar from './components/GlobalStatusBar';
-import { adminGetSettings, getMe } from './services/api';
+import { getMe } from './services/api';
 
 const PERSONA_ORDER = {
   Executive: ['/', '/budget', '/exports', '/costs', '/recommendations', '/governance', '/resources', '/actions', '/logs', '/settings'],
@@ -146,19 +147,14 @@ function AppLayout() {
     let mounted = true;
     const checkAuth = async () => {
       try {
-        const res = await adminGetSettings();
+        const me = await getMe();
         if (!mounted) return;
-        if (res.data?.success) {
+        if (me.data?.success) {
           setAuthenticated(true);
-          setProfileName(res.data.data?.username || 'admin');
-          try {
-            const me = await getMe();
-            setRole(me.data?.data?.role || 'admin');
-            setAppVersion(me.data?.data?.app_version || '1.0.0');
-            setDemoMode(Boolean(me.data?.data?.feature_flags?.enable_demo_mode));
-          } catch {
-            setRole('admin');
-          }
+          setProfileName(me.data?.data?.username || 'user');
+          setRole(me.data?.data?.role || 'viewer');
+          setAppVersion(me.data?.data?.app_version || '1.0.0');
+          setDemoMode(parseBooleanFlag(me.data?.data?.feature_flags?.enable_demo_mode));
         } else {
           setAuthenticated(false);
         }

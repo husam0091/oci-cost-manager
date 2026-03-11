@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { approveAction, getAction, getMe, listActions, rejectAction, rollbackAction, runAction } from '../services/api';
+import { parseBooleanFlag } from '../utils/flags';
 
 function statusChipClass(status) {
   if (status === 'pending_approval') return 'bg-amber-50 text-amber-800';
@@ -28,7 +29,7 @@ function Actions() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [runOutput, setRunOutput] = useState('');
   const [me, setMe] = useState({ role: 'admin', feature_flags: {} });
-  const demoMode = Boolean(me.feature_flags?.enable_demo_mode);
+  const demoMode = parseBooleanFlag(me.feature_flags?.enable_demo_mode);
 
   const load = async () => {
     try {

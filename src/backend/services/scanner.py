@@ -102,7 +102,30 @@ def upsert_resources(db: Session) -> int:
     tenancy_id = oci_client.tenancy_id
     availability_domains = oci_client.list_availability_domains(tenancy_id)
     ad_names = [ad.name for ad in availability_domains]
-    
+
+    # Build tenancy-wide attachment maps first to avoid cross-compartment false UNATTACHED labels.
+    attached_vol_ids_global: set[str] = set()
+    attached_boot_ids_global: set[str] = set()
+    attached_states = {"ATTACHED", "ATTACHING", "DETACHING"}
+    for comp in comps:
+        comp_id = comp.id
+        try:
+            for att in oci_client.list_volume_attachments(comp_id):
+                state = str(getattr(att, "lifecycle_state", "") or "").upper()
+                vol_id = getattr(att, "volume_id", None)
+                if vol_id and state in attached_states:
+                    attached_vol_ids_global.add(vol_id)
+        except Exception:
+            pass
+        try:
+            for att in oci_client.list_boot_volume_attachments(comp_id):
+                state = str(getattr(att, "lifecycle_state", "") or "").upper()
+                bvol_id = getattr(att, "boot_volume_id", None)
+                if bvol_id and state in attached_states:
+                    attached_boot_ids_global.add(bvol_id)
+        except Exception:
+            pass
+
     for comp in comps:
         comp_id = comp.id
         
@@ -246,10 +269,8 @@ def upsert_resources(db: Session) -> int:
 
         # === Block and Boot Volumes (including unattached) ===
         try:
-            vol_attach = oci_client.list_volume_attachments(comp_id)
-            boot_attach = oci_client.list_boot_volume_attachments(comp_id)
-            attached_vol_ids = {getattr(v, "volume_id", None) for v in vol_attach if getattr(v, "lifecycle_state", "") == "ATTACHED"}
-            attached_boot_ids = {getattr(v, "boot_volume_id", None) for v in boot_attach if getattr(v, "lifecycle_state", "") == "ATTACHED"}
+            attached_vol_ids = attached_vol_ids_global
+            attached_boot_ids = attached_boot_ids_global
 
             for ad_name in ad_names:
                 for vol in oci_client.list_volumes(comp_id, ad_name):

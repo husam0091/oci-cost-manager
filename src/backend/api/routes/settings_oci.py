@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from core.auth import decode_token
 from core.database import get_db
 from core.models import OciIntegration, Setting
+from core.rbac import resolve_principal
 from services.event_logger import audit_event
 from services.oci_client import test_oci_connection
 from services.oci_credentials import get_oci_runtime_credentials, rotate_oci_private_key, upsert_oci_metadata
@@ -37,16 +38,13 @@ def _require_admin(
     token: Optional[str] = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
 ):
-    if not token:
-        raise HTTPException(status_code=401, detail={"success": False, "error": {"code": "UNAUTHENTICATED", "reason": "Not authenticated"}})
-    data = decode_token(token)
-    if not data or not data.get("sub"):
-        raise HTTPException(status_code=401, detail={"success": False, "error": {"code": "UNAUTHENTICATED", "reason": "Invalid token"}})
-    setting = db.query(Setting).filter(Setting.id == 1).one_or_none()
-    role = (getattr(setting, "user_role", "admin") or "admin").lower() if setting else "admin"
-    if role != "admin":
-        raise HTTPException(status_code=403, detail={"success": False, "error": {"code": "FORBIDDEN", "reason": "Admin role required"}})
-    return data
+    try:
+        principal = resolve_principal(db, token, strict=True)
+    except PermissionError:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if principal.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return {"sub": principal.username}
 
 
 def _rate_limit(user_key: str) -> None:
