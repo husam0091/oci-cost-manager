@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.config import get_settings as get_app_settings
 from core.database import ensure_settings_schema, get_db
-from core.models import Budget, ScanRun, Setting
+from core.models import Budget, ScanRun, Setting, UserAccount
 from core.rbac import feature_flags, resolve_principal, role_job_profile
 
 router = APIRouter()
@@ -22,7 +22,13 @@ async def me(
     db: Session = Depends(get_db),
 ):
     ensure_settings_schema()
-    principal = resolve_principal(db, token, strict=False)
+    # If users exist in the DB, require a valid JWT so the login page is shown
+    has_users = db.query(UserAccount).filter(UserAccount.is_active == True).count() > 0
+    strict = has_users
+    try:
+        principal = resolve_principal(db, token, strict=strict)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
     setting = db.query(Setting).filter(Setting.id == 1).one_or_none()
     scan_count = int(db.query(func.count(ScanRun.id)).scalar() or 0)
     budget_count = int(db.query(func.count(Budget.budget_id)).scalar() or 0)
