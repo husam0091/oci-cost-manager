@@ -740,6 +740,41 @@ async def get_insights(
     return {"success": True, "data": insights[:5], "meta": {"count": min(len(insights), 5)}}
 
 
+@router.get("/daily")
+async def get_daily_costs(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD), defaults to first of current month"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+):
+    """Daily cost breakdown by service - mirrors OCI Cost Analysis daily view."""
+    today = datetime.now(UTC)
+    start = _parse_cost_date(start_date, is_end=False) if start_date else today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    end = _parse_cost_date(end_date, is_end=True) if end_date else today
+    if end <= start:
+        raise HTTPException(status_code=422, detail="end_date must be after start_date")
+    cache_key = _cache_key("daily_costs", start=iso_date(start), end=iso_date(end))
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return {"success": True, "data": cached, "cached": True}
+    try:
+        calculator = get_cost_calculator()
+        daily = calculator.get_daily_costs(start, end)
+        mtd_total = round(sum(d["total"] for d in daily), 2)
+        result = {
+            "period": {"start_date": iso_date(start), "end_date": iso_date(end)},
+            "mtd_total": mtd_total,
+            "days": daily,
+        }
+        set_cached(cache_key, result, COST_CACHE_TTL)
+        return {"success": True, "data": result, "cached": False}
+    except Exception as exc:
+        cached = get_cached(cache_key)
+        if cached is not None:
+            return {"success": True, "data": cached, "cached": True, "warning": str(exc)}
+        if _is_usage_rate_limit_error(exc):
+            raise HTTPException(status_code=503, detail="OCI Usage API rate-limited (429). Retry shortly.")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/trends")
 async def get_cost_trends(
     months: int = Query(6, description="Number of months to include"),

@@ -401,6 +401,37 @@ class OCIClientService:
         except Exception:
             return []
 
+    def get_subscriptions(self) -> list:
+        """Get Universal Credit subscriptions from OCI onesubscription API.
+
+        Returns list of subscription dicts with committed value and metadata.
+        Returns empty list (with graceful fallback) if IAM access is missing.
+        """
+        try:
+            import oci.onesubscription  # noqa: PLC0415
+            sub_client = oci.onesubscription.SubscriptionClient(self.config)
+            response = sub_client.list_subscriptions(compartment_id=self.tenancy_id)
+            result = []
+            for s in (response.data or []):
+                currency_obj = getattr(s, "currency", None)
+                iso_code = (
+                    getattr(currency_obj, "iso_code", None)
+                    if currency_obj
+                    else None
+                ) or "USD"
+                result.append({
+                    "id": str(getattr(s, "id", "") or ""),
+                    "status": str(getattr(s, "status", "") or ""),
+                    "subscription_type": str(getattr(s, "subscription_type", "") or ""),
+                    "time_start": str(getattr(s, "time_start", None)),
+                    "time_end": str(getattr(s, "time_end", None)),
+                    "total_value": float(getattr(s, "total_value", 0) or 0),
+                    "currency": iso_code,
+                })
+            return result
+        except Exception:
+            return []
+
 
 # Singleton instance
 _oci_client: Optional[OCIClientService] = None

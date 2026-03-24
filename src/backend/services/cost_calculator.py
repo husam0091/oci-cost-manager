@@ -288,6 +288,46 @@ class CostCalculatorService:
         
         return result
     
+    def get_daily_costs(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> List[Dict[str, Any]]:
+        """Get costs broken down by day and service (mirrors OCI Cost Analysis daily view).
+
+        Returns:
+            List of {date, total, by_service} dicts ordered by date.
+        """
+        cache_key = f"daily_costs_{start_date.date()}_{end_date.date()}"
+        cached = get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        items = self.get_usage_summary(
+            start_date=start_date,
+            end_date=end_date,
+            granularity="DAILY",
+            group_by=["service"],
+        )
+
+        by_date: Dict[str, Dict] = {}
+        for item in items:
+            date_key = (item.get("time_usage_started") or "")[:10]
+            if not date_key:
+                continue
+            service = item.get("service") or "Other"
+            cost = float(item.get("computed_amount") or 0)
+            if date_key not in by_date:
+                by_date[date_key] = {"date": date_key, "total": 0.0, "by_service": {}}
+            by_date[date_key]["total"] = round(by_date[date_key]["total"] + cost, 4)
+            by_date[date_key]["by_service"][service] = round(
+                by_date[date_key]["by_service"].get(service, 0.0) + cost, 4
+            )
+
+        result = [v for _, v in sorted(by_date.items())]
+        set_cached(cache_key, result)
+        return result
+
     def get_cost_trends(
         self,
         months: int = 6,

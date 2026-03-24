@@ -472,6 +472,12 @@ export const checkHealthLive = () => api.get('/health/live');
 export const checkHealthReady = () => api.get('/health/ready');
 export const checkOCIHealth = () => api.get('/health/oci');
 
+// Daily cost breakdown (OCI Cost Analysis view)
+export const getDailyCosts = (params = {}) => api.get('/costs/daily', { params });
+
+// Universal Credits subscriptions
+export const getSubscriptions = () => api.get('/subscriptions');
+
 export default api;
 
 export const adminGetPortalSslSettings = () => api.get('/settings/portal-ssl');

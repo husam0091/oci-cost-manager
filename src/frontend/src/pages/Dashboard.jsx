@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, ShieldCheck, AlertTriangle, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-import { costsBreakdownV2, costsMoversV2, dashboardSummaryV2, getMe, adminGetScanRuns, getDiagnostics } from '../services/api';
+import { costsBreakdownV2, costsMoversV2, dashboardSummaryV2, getMe, adminGetScanRuns, getDiagnostics, getDailyCosts, getSubscriptions } from '../services/api';
 import { parseBooleanFlag } from '../utils/flags';
 import { getDateRangeForPreset } from '../utils/dateRanges';
 import { UI_COPY } from '../constants/copy';
@@ -104,6 +104,146 @@ function Toggle({ options, value, onChange }) {
   );
 }
 
+// ─── Universal Credits Panel ────────────────────────────────────────────────
+function UniversalCreditsPanel({ data }) {
+  if (!data) return null;
+  const {
+    total_committed, total_consumed_ytd, total_consumed_mtd,
+    remaining, utilization_pct, year_start, as_of,
+    subscription_api_available, subscriptions,
+  } = data;
+  const pct = Number(utilization_pct || 0);
+  const barColor = pct >= 90 ? 'bg-rose-500' : pct >= 70 ? 'bg-amber-400' : 'bg-emerald-500';
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-slate-700">Universal Credits</h2>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+          YTD {year_start} → {as_of}
+        </span>
+      </div>
+      {!subscription_api_available && (
+        <div className="mt-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          Subscription API unavailable — add <code className="bg-amber-100 px-1 rounded">manage onesubscription in tenancy</code> to your OCI policy to see committed credits. Consumed cost is shown from the Usage API.
+        </div>
+      )}
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">Committed (Annual)</p>
+          <p className="mt-1 text-lg font-bold text-slate-900">
+            {total_committed > 0 ? `$${Number(total_committed).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—'}
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">Consumed YTD</p>
+          <p className="mt-1 text-lg font-bold text-indigo-700">
+            {total_consumed_ytd != null ? `$${Number(total_consumed_ytd).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—'}
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">Consumed MTD</p>
+          <p className="mt-1 text-lg font-bold text-slate-800">
+            {total_consumed_mtd != null ? `$${Number(total_consumed_mtd).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—'}
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+          <p className="text-xs text-slate-500">Remaining</p>
+          <p className={`mt-1 text-lg font-bold ${remaining != null && remaining < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+            {remaining != null ? `$${Number(remaining).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—'}
+          </p>
+        </div>
+      </div>
+      {total_committed > 0 && total_consumed_ytd != null && (
+        <div className="mt-4">
+          <div className="mb-1 flex justify-between text-xs text-slate-500">
+            <span>Credit utilization</span>
+            <span className="font-medium">{pct.toFixed(1)}%</span>
+          </div>
+          <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
+            <div className={`h-3 rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+          </div>
+          <div className="mt-1 flex justify-between text-xs text-slate-400">
+            <span>$0</span>
+            <span>${Number(total_committed).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+          </div>
+        </div>
+      )}
+      {subscription_api_available && subscriptions?.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {subscriptions.map((s, i) => (
+            <div key={s.id || i} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
+              <span className="rounded-full bg-indigo-100 px-2 py-0.5 font-medium text-indigo-700">{s.subscription_type || 'ANNUAL'}</span>
+              <span>{s.time_start?.slice(0,10)} → {s.time_end?.slice(0,10)}</span>
+              <span className="ml-auto font-medium">${Number(s.total_value || 0).toLocaleString(undefined,{maximumFractionDigits:0})} {s.currency}</span>
+              <span className={`rounded-full px-2 py-0.5 ${(s.status||'').toLowerCase()==='active'?'bg-emerald-100 text-emerald-700':'bg-slate-200 text-slate-500'}`}>{s.status||'—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Daily Cost Chart ────────────────────────────────────────────────────────
+function DailyCostChart({ data }) {
+  if (!data?.days?.length) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-700">Daily Cost — Current Month</h2>
+        <p className="mt-3 text-sm text-slate-500">No daily data available. Run a scan to populate cost data.</p>
+      </div>
+    );
+  }
+  const days = data.days;
+  const maxVal = Math.max(...days.map(d => d.total), 0.01);
+  const mtd = data.mtd_total || 0;
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700">Daily Cost — Current Month</h2>
+          <p className="text-xs text-slate-400">{data.period?.start_date} to {data.period?.end_date}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-slate-500">MTD Total</p>
+          <p className="text-xl font-bold text-indigo-700">${Number(mtd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+        </div>
+      </div>
+      <div className="mt-4 flex items-end gap-0.5 overflow-x-auto pb-1" style={{ minHeight: '80px' }}>
+        {days.map((d) => {
+          const heightPct = maxVal > 0 ? (d.total / maxVal) * 100 : 0;
+          const dayNum = new Date(d.date + 'T00:00:00').getDate();
+          const isToday = d.date === new Date().toISOString().slice(0, 10);
+          return (
+            <div key={d.date} className="group relative flex flex-1 flex-col items-center" style={{ minWidth: '14px' }}>
+              <div
+                className={`w-full rounded-t transition-all ${
+                  isToday ? 'bg-indigo-600' : 'bg-indigo-300 hover:bg-indigo-500'
+                }`}
+                style={{ height: `${Math.max(heightPct, 2)}px`, maxHeight: '80px' }}
+              />
+              {/* tooltip */}
+              <div className="pointer-events-none absolute bottom-full mb-1 hidden w-max rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs shadow-lg group-hover:block z-10">
+                <p className="font-semibold text-slate-800">{d.date}</p>
+                <p className="text-indigo-700">${Number(d.total).toFixed(2)}</p>
+                {Object.entries(d.by_service || {}).slice(0, 4).map(([svc, cost]) => (
+                  <p key={svc} className="text-slate-500">{svc}: ${Number(cost).toFixed(2)}</p>
+                ))}
+              </div>
+              <span className="mt-1 text-[9px] text-slate-400 leading-none">{dayNum}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex justify-between text-xs text-slate-400">
+        <span>Day 1</span>
+        <span>Peak: ${Number(maxVal).toFixed(2)}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Data Freshness Panel ────────────────────────────────────────────────────
 function DataFreshnessPanel({ lastScan, ociStatus }) {
   const [open, setOpen] = useState(false);
   const ago = lastScan ? (() => {
@@ -171,6 +311,8 @@ function Dashboard({ persona = 'Executive' }) {
   const [demoMode, setDemoMode] = useState(false);
   const [lastScan, setLastScan] = useState(null);
   const [ociStatus, setOciStatus] = useState(null);
+  const [subscriptionData, setSubscriptionData] = useState(null);
+  const [dailyData, setDailyData] = useState(null);
 
   const loadDashboardData = useCallback(async () => {
     const summaryRes = await dashboardSummaryV2({
@@ -246,6 +388,14 @@ function Dashboard({ persona = 'Executive' }) {
         setOciStatus(res?.data?.data?.status || null);
       })
       .catch(() => {});
+    // Universal Credits
+    getSubscriptions()
+      .then((res) => setSubscriptionData(res?.data?.data || null))
+      .catch(() => {});
+    // Daily cost chart
+    getDailyCosts()
+      .then((res) => setDailyData(res?.data?.data || null))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -297,6 +447,10 @@ function Dashboard({ persona = 'Executive' }) {
   return (
     <div className="min-h-full space-y-6 bg-slate-50 p-1">
       <DataFreshnessPanel lastScan={lastScan} ociStatus={ociStatus} />
+
+      <UniversalCreditsPanel data={subscriptionData} />
+
+      <DailyCostChart data={dailyData} />
 
       {error ? (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
