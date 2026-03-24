@@ -631,6 +631,44 @@ function Settings({ onAuthChange, forceLogin = false }) {
 
       {activeTab === 'operations' && (
         <div className="space-y-4">
+
+          <div className="rounded-2xl border border-white/60 bg-white/90 p-6 shadow-lg">
+            <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900">
+              <ShieldCheck size={18} className="text-emerald-600" /> Cost Data Accuracy
+            </h3>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-xs text-emerald-800 space-y-1">
+                <p className="font-semibold text-sm">Data Source</p>
+                <p>Costs are fetched live from the <strong>OCI Usage API</strong> (<code className="bg-emerald-100 px-1 rounded">RequestSummarizedUsages</code>) using <code className="bg-emerald-100 px-1 rounded">query_type=COST</code>. The <code className="bg-emerald-100 px-1 rounded">computed_amount</code> field is used — this is the same source as OCI Cost Analysis. No estimation or rounding is applied.</p>
+              </div>
+              <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 text-xs text-amber-800 space-y-1">
+                <p className="font-semibold text-sm">Billing Lag</p>
+                <p>OCI billing data has a <strong>24–48 hour processing delay</strong>. The app shows costs as returned by OCI — today&apos;s actual charges are not yet available in the Usage API. Run a fresh scan to get the most recent data available from OCI.</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700 space-y-1">
+                <p className="font-semibold text-sm">Required IAM Policies</p>
+                <p>The OCI key must have access to the entire tenancy to return complete cost data. Required policies:</p>
+                <ul className="mt-1 list-disc list-inside space-y-0.5">
+                  <li><code className="bg-slate-100 px-1 rounded">TENANCY_INSPECT</code></li>
+                  <li><code className="bg-slate-100 px-1 rounded">USAGE_INSPECTOR</code></li>
+                  <li>Or: <code className="bg-slate-100 px-1 rounded">manage usage-reports in tenancy</code></li>
+                </ul>
+                <p className="mt-1">If the key only has compartment-level access, costs will be partial and lower than OCI Cost Analysis.</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700 space-y-1">
+                <p className="font-semibold text-sm">How to Cross-Check</p>
+                <p>In the OCI console:</p>
+                <ol className="mt-1 list-decimal list-inside space-y-0.5">
+                  <li>Go to <strong>Billing &amp; Cost Management</strong></li>
+                  <li>Click <strong>Cost Analysis</strong></li>
+                  <li>Set scope to <strong>All Compartments</strong></li>
+                  <li>Set period to <strong>This Month</strong> or the same date range shown on the Dashboard</li>
+                  <li>Compare the total — it should match within the billing lag window</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+
           <div className="rounded-2xl border border-white/60 bg-white/90 p-6 shadow-lg">
             <h3 className="mb-4 text-lg font-semibold text-slate-900">Important Compartments</h3>
             <p className="mb-3 text-sm text-slate-500">Selected compartments appear on Dashboard as Core Business Spotlight.</p>

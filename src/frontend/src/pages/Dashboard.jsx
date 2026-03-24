@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ShieldCheck, AlertTriangle, Info } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-import { costsBreakdownV2, costsMoversV2, dashboardSummaryV2, getMe } from '../services/api';
+import { costsBreakdownV2, costsMoversV2, dashboardSummaryV2, getMe, adminGetScanRuns, getDiagnostics } from '../services/api';
 import { parseBooleanFlag } from '../utils/flags';
 import { getDateRangeForPreset } from '../utils/dateRanges';
 import { UI_COPY } from '../constants/copy';
@@ -104,6 +104,63 @@ function Toggle({ options, value, onChange }) {
   );
 }
 
+function DataFreshnessPanel({ lastScan, ociStatus }) {
+  const [open, setOpen] = useState(false);
+  const ago = lastScan ? (() => {
+    const diff = Math.floor((Date.now() - new Date(lastScan)) / 60000);
+    if (diff < 60) return `${diff}m ago`;
+    if (diff < 1440) return `${Math.floor(diff / 60)}h ago`;
+    return `${Math.floor(diff / 1440)}d ago`;
+  })() : null;
+  const connected = ociStatus === 'healthy';
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-5 py-3 text-left"
+      >
+        <div className="flex items-center gap-3">
+          <span className={`h-2.5 w-2.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+          <span className="text-sm font-medium text-slate-700">
+            OCI Cost Data — {connected ? 'Connected' : 'Check Connection'}
+          </span>
+          {ago && <span className="text-xs text-slate-400">Last sync {ago}</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">24–48h billing lag</span>
+          <Info size={14} className="text-slate-400" />
+        </div>
+      </button>
+      {open && (
+        <div className="border-t border-slate-100 px-5 py-4 text-sm text-slate-600 space-y-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1">
+              <p className="text-xs font-semibold text-slate-700 flex items-center gap-1"><ShieldCheck size={13} className="text-emerald-600" /> Data Source</p>
+              <p className="text-xs">Costs come directly from the <span className="font-medium">OCI Usage API</span> using <code className="bg-slate-100 px-1 rounded">query_type=COST</code> and <code className="bg-slate-100 px-1 rounded">computed_amount</code> — the same field OCI Cost Analysis uses. No estimates or calculations are applied.</p>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 space-y-1">
+              <p className="text-xs font-semibold text-amber-800 flex items-center gap-1"><AlertTriangle size={13} /> Billing Lag</p>
+              <p className="text-xs text-amber-700">OCI billing data has a <span className="font-medium">24–48 hour processing delay</span>. Costs shown reflect charges up to 1–2 days ago. Today's actual charges will appear in a future scan.</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1">
+              <p className="text-xs font-semibold text-slate-700">Currency</p>
+              <p className="text-xs">Values are shown in the currency returned by OCI (typically <span className="font-medium">USD</span>). If your tenancy bills in a different currency, the raw amounts from OCI are stored as-is without conversion.</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1">
+              <p className="text-xs font-semibold text-slate-700">How to verify</p>
+              <p className="text-xs">Compare the <span className="font-medium">Total Spend</span> on this dashboard against <span className="font-medium">OCI Console → Billing → Cost Analysis → This Month → All Compartments</span>. Values should match within the billing lag window. A larger gap usually means the OCI key lacks <code className="bg-slate-100 px-1 rounded">TENANCY_INSPECT</code> or <code className="bg-slate-100 px-1 rounded">USAGE_INSPECTOR</code> permissions.</p>
+            </div>
+          </div>
+          {lastScan && (
+            <p className="text-xs text-slate-400">Last successful scan: {new Date(lastScan).toLocaleString()}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard({ persona = 'Executive' }) {
   const period = useMemo(() => getDateRangeForPreset('prev_month'), []);
 
@@ -112,6 +169,8 @@ function Dashboard({ persona = 'Executive' }) {
   const [executiveView, setExecutiveView] = useState(false);
   const [productState, setProductState] = useState(null);
   const [demoMode, setDemoMode] = useState(false);
+  const [lastScan, setLastScan] = useState(null);
+  const [ociStatus, setOciStatus] = useState(null);
 
   const loadDashboardData = useCallback(async () => {
     const summaryRes = await dashboardSummaryV2({
@@ -174,6 +233,19 @@ function Dashboard({ persona = 'Executive' }) {
         setProductState(null);
         setDemoMode(false);
       });
+    // Load last scan time and OCI connection status
+    adminGetScanRuns()
+      .then((res) => {
+        const runs = res?.data?.data || [];
+        const last = runs.find((r) => r.status === 'success');
+        if (last?.finished_at) setLastScan(last.finished_at);
+      })
+      .catch(() => {});
+    getDiagnostics()
+      .then((res) => {
+        setOciStatus(res?.data?.data?.status || null);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -224,6 +296,8 @@ function Dashboard({ persona = 'Executive' }) {
 
   return (
     <div className="min-h-full space-y-6 bg-slate-50 p-1">
+      <DataFreshnessPanel lastScan={lastScan} ociStatus={ociStatus} />
+
       {error ? (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
           Data unavailable due to API error
