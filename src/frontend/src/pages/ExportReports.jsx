@@ -19,6 +19,7 @@ const REPORT_CATALOG = [
   { id: 'budget_health', title: 'Budget Health', description: 'Budget utilization, breaches, and forecast risks', audience: 'Exec/Finance/Engineering' },
   { id: 'actions_audit', title: 'Actions Audit', description: 'Action approvals, execution timeline, and savings realization placeholders', audience: 'Exec/FinOps/Ops/Sec' },
   { id: 'ops_audit', title: 'Ops Audit', description: 'Scans/alerts/actions operational timelines and failure root causes', audience: 'Platform/Ops' },
+  { id: 'vm_windows_inventory', title: 'VM & Windows Server Inventory', description: 'All compute VMs and Windows servers — shape, OCPUs, memory, private IP, image, compartment, and allocation tags', audience: 'Ops/Security' },
 ];
 
 function ExportReports() {

@@ -898,6 +898,7 @@ def _report_catalog() -> dict[str, dict]:
         "budget_health": {"title": "Budget Health", "audience": "Exec/Finance/Engineering", "tier": 2},
         "actions_audit": {"title": "Actions Audit", "audience": "Exec/FinOps/Ops/Sec", "tier": 2},
         "ops_audit": {"title": "Ops Audit", "audience": "Platform/Ops", "tier": 2},
+        "vm_windows_inventory": {"title": "VM & Windows Server Inventory", "audience": "Ops/Security", "tier": 1},
     }
 
 
@@ -1753,6 +1754,60 @@ def _build_report_data_v2(
         tables["Alerts Timeline"] = {"columns": ["alert_id", "budget_id", "alert_kind", "threshold", "triggered_at"], "rows": alert_rows, "add_totals": False}
         tables["Actions By Status"] = {"columns": ["status", "count"], "rows": action_rows, "add_totals": True}
         tables["Failures Root Causes"] = {"columns": ["failure_reason", "count"], "rows": failure_rows, "add_totals": True}
+    elif report_type == "vm_windows_inventory":
+        _VM_TYPES = {"compute", "instance", "windows_server", "windows"}
+        vm_rows: list[dict] = []
+        for r in sorted(resources.values(), key=lambda x: (x.name or "").lower()):
+            rtype_lower = (r.type or "").lower()
+            is_vm = any(t in rtype_lower for t in _VM_TYPES) or bool(r.shape)
+            if not is_vm:
+                continue
+            details = r.details or {}
+            comp_name = compartments.get(r.compartment_id, r.compartment_id or "")
+            alloc = evaluate_allocation(
+                r, rules, compartment_name=comp_name, sku_text=""
+            )
+            # Private IP — stored as list or string
+            raw_ips = details.get("private_ips") or details.get("private_ip") or []
+            if isinstance(raw_ips, list):
+                private_ip = ", ".join(str(ip) for ip in raw_ips if ip)
+            else:
+                private_ip = str(raw_ips) if raw_ips else ""
+            # OCPUs
+            ocpus_raw = (
+                details.get("ocpus")
+                or details.get("ocpu_count")
+                or details.get("cpu_count")
+                or ""
+            )
+            ocpus = str(ocpus_raw) if ocpus_raw != "" else ""
+            # Memory
+            mem_raw = details.get("memory_in_gbs") or details.get("memory_gb") or ""
+            memory = f"{mem_raw} GB" if mem_raw else ""
+            vm_rows.append({
+                "name": r.name or "",
+                "type": r.type or "compute",
+                "status": (r.status or "").upper(),
+                "compartment": comp_name,
+                "env": alloc.env or "Unallocated",
+                "team": alloc.team or "Unallocated",
+                "app": alloc.app or "Unallocated",
+                "confidence": alloc.allocation_confidence or "low",
+                "shape": r.shape or "",
+                "ocpus": ocpus,
+                "memory": memory,
+                "private_ip": private_ip,
+                "image": details.get("image_name") or details.get("image") or "",
+            })
+        tables["VM & Windows Server Inventory"] = {
+            "columns": [
+                "name", "type", "status", "compartment",
+                "env", "team", "app", "confidence",
+                "shape", "ocpus", "memory", "private_ip", "image",
+            ],
+            "rows": vm_rows,
+            "add_totals": False,
+        }
     else:
         raise HTTPException(status_code=400, detail="Unknown report_type")
 
