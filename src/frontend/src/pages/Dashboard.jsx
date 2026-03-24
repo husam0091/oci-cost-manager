@@ -105,15 +105,41 @@ function Toggle({ options, value, onChange }) {
 }
 
 // ─── Universal Credits Panel ────────────────────────────────────────────────
+const MANUAL_COMMIT_KEY = 'oci_manual_commitment';
+
 function UniversalCreditsPanel({ data }) {
+  const [manualInput, setManualInput] = useState(
+    () => localStorage.getItem(MANUAL_COMMIT_KEY) || ''
+  );
+  const [editMode, setEditMode] = useState(false);
+  const [draft, setDraft] = useState(manualInput);
+
   if (!data) return null;
   const {
-    total_committed, total_consumed_ytd, total_consumed_mtd,
-    remaining, utilization_pct, year_start, as_of,
+    total_consumed_ytd, total_consumed_mtd,
+    year_start, as_of,
     subscription_api_available, subscriptions,
   } = data;
+
+  // Use API value if available, else fall back to manually entered value
+  const apiCommitted = Number(data.total_committed || 0);
+  const manualCommitted = Number(manualInput || 0);
+  const total_committed = apiCommitted > 0 ? apiCommitted : manualCommitted;
+  const remaining = total_committed > 0 && total_consumed_ytd != null
+    ? round2(total_committed - total_consumed_ytd) : null;
+  const utilization_pct = total_committed > 0 && total_consumed_ytd != null
+    ? Math.min(round2(total_consumed_ytd / total_committed * 100), 100) : 0;
+
+  function round2(v) { return Math.round(v * 100) / 100; }
   const pct = Number(utilization_pct || 0);
   const barColor = pct >= 90 ? 'bg-rose-500' : pct >= 70 ? 'bg-amber-400' : 'bg-emerald-500';
+
+  const saveManual = () => {
+    localStorage.setItem(MANUAL_COMMIT_KEY, draft);
+    setManualInput(draft);
+    setEditMode(false);
+  };
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3">
@@ -123,8 +149,55 @@ function UniversalCreditsPanel({ data }) {
         </span>
       </div>
       {!subscription_api_available && (
-        <div className="mt-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          Subscription API unavailable — add <code className="bg-amber-100 px-1 rounded">manage onesubscription in tenancy</code> to your OCI policy to see committed credits. Consumed cost is shown from the Usage API.
+        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-medium text-slate-700">Annual Commitment (manual)</p>
+              <p className="text-xs text-slate-400">Enter your OCI Universal Credit commitment to see utilization</p>
+            </div>
+            {!editMode ? (
+              <div className="flex items-center gap-2">
+                {manualCommitted > 0 && (
+                  <span className="text-sm font-bold text-slate-800">
+                    ${manualCommitted.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setDraft(manualInput); setEditMode(true); }}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100"
+                >
+                  {manualCommitted > 0 ? 'Edit' : 'Set Amount'}
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">$</span>
+                <input
+                  type="number"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  className="w-32 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                  placeholder="e.g. 500000"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={saveManual}
+                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditMode(false)}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
       <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
