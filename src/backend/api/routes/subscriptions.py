@@ -5,37 +5,30 @@ from datetime import UTC, datetime
 from typing import Optional
 from fastapi import APIRouter
 
-from services.oci_client import get_oci_client
 from services.cost_calculator import get_cost_calculator
 from core.cache import get_cached, set_cached
 
 router = APIRouter()
 
-_CACHE_TTL = 3600  # 1 hour – subscription data rarely changes
+_CACHE_TTL = 900  # 15-minute cache for cost data
 
 
 @router.get("")
 async def get_subscriptions():
-    """Return Universal Credit subscriptions with consumed/remaining amounts.
+    """Return Universal Credit consumption data from the OCI Usage API.
 
-    Consumed = YTD cost from OCI Usage API (same data OCI Cost Analysis uses).
-    Committed = total_value from OCI onesubscription API (annual commitment).
-
-    Falls back gracefully when the OCI key lacks onesubscription IAM access.
+    Consumed YTD/MTD = OCI Usage API computed_amount (same as Cost Analysis).
+    Committed amount = not available without manage onesubscription in tenancy;
+    set manually in the Dashboard UI instead.
     """
-    cache_key = f"subscriptions_{datetime.now(UTC).strftime('%Y-%m-%d')}"
+    cache_key = f"subscriptions_v3_{datetime.now(UTC).strftime('%Y-%m-%d_%H')}"
     cached = get_cached(cache_key)
     if cached is not None:
         return {"success": True, "data": cached, "cached": True}
 
-    # ── 1. Fetch subscription details ──────────────────────────────────────
+    # ── Subscription API not attempted (unreachable in most deployments) ───
     subscriptions: list = []
     subscription_error: Optional[str] = None
-    try:
-        oci_client = get_oci_client()
-        subscriptions = oci_client.get_subscriptions()
-    except Exception as exc:
-        subscription_error = str(exc)[:120]
 
     # ── 2. YTD consumed cost from Usage API ────────────────────────────────
     today = datetime.now(UTC)

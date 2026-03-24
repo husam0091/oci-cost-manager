@@ -148,6 +148,11 @@ function UniversalCreditsPanel({ data }) {
           YTD {year_start} → {as_of}
         </span>
       </div>
+      {!subscription_api_available && data.subscription_error && (
+        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          <span className="font-medium">API diagnostic:</span> {data.subscription_error}
+        </div>
+      )}
       {!subscription_api_available && (
         <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
           <div className="flex items-center justify-between gap-2">

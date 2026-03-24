@@ -404,33 +404,108 @@ class OCIClientService:
     def get_subscriptions(self) -> list:
         """Get Universal Credit subscriptions from OCI onesubscription API.
 
-        Returns list of subscription dicts with committed value and metadata.
-        Returns empty list (with graceful fallback) if IAM access is missing.
+        Tries three OCI endpoints in order:
+        1. SubscriptionClient.list_subscriptions()
+        2. SubscribedServiceClient.list_subscribed_services()
+        3. osp_gateway.SubscriptionServiceClient.list_subscriptions()
+
+        Returns list of subscription dicts, or raises the last error for
+        the caller to capture and surface in the API response.
         """
+        errors = []
+        import oci.onesubscription  # noqa: PLC0415
+
+        _timeout = (3, 5)  # (connect_timeout_s, read_timeout_s) — fast-fail
+
+        # ── Attempt 1: SubscriptionClient ────────────────────────────────────
         try:
-            import oci.onesubscription  # noqa: PLC0415
-            sub_client = oci.onesubscription.SubscriptionClient(self.config)
+            sub_client = oci.onesubscription.SubscriptionClient(self.config, timeout=_timeout)
             response = sub_client.list_subscriptions(compartment_id=self.tenancy_id)
             result = []
             for s in (response.data or []):
                 currency_obj = getattr(s, "currency", None)
-                iso_code = (
-                    getattr(currency_obj, "iso_code", None)
-                    if currency_obj
-                    else None
-                ) or "USD"
-                result.append({
-                    "id": str(getattr(s, "id", "") or ""),
-                    "status": str(getattr(s, "status", "") or ""),
-                    "subscription_type": str(getattr(s, "subscription_type", "") or ""),
-                    "time_start": str(getattr(s, "time_start", None)),
-                    "time_end": str(getattr(s, "time_end", None)),
-                    "total_value": float(getattr(s, "total_value", 0) or 0),
-                    "currency": iso_code,
-                })
-            return result
-        except Exception:
-            return []
+                iso_code = (getattr(currency_obj, "iso_code", None) if currency_obj else None) or "USD"
+                total_value = float(getattr(s, "total_value", 0) or 0)
+                if total_value > 0:
+                    result.append({
+                        "id": str(getattr(s, "id", "") or ""),
+                        "status": str(getattr(s, "status", "") or ""),
+                        "subscription_type": str(getattr(s, "subscription_type", "") or ""),
+                        "time_start": str(getattr(s, "time_start", None)),
+                        "time_end": str(getattr(s, "time_end", None)),
+                        "total_value": total_value,
+                        "currency": iso_code,
+                        "source": "SubscriptionClient",
+                    })
+            if result:
+                return result
+        except Exception as exc:
+            errors.append(f"SubscriptionClient: {exc}")
+
+        # ── Attempt 2: SubscribedServiceClient ───────────────────────────────
+        try:
+            svc_client = oci.onesubscription.SubscribedServiceClient(self.config, timeout=_timeout)
+            response = svc_client.list_subscribed_services(compartment_id=self.tenancy_id)
+            result = []
+            for s in (response.data or []):
+                net_price = float(getattr(s, "net_unit_price", 0) or 0)
+                qty = float(getattr(s, "quantity", 1) or 1)
+                total_value = round(net_price * qty, 2)
+                if total_value <= 0:
+                    # Try term_value fallback
+                    total_value = float(getattr(s, "term_value", 0) or 0)
+                if total_value > 0:
+                    result.append({
+                        "id": str(getattr(s, "id", "") or ""),
+                        "status": str(getattr(s, "status", "") or ""),
+                        "subscription_type": str(getattr(s, "original_promo_amount", "") or getattr(s, "product", "") or "SUBSCRIBED_SERVICE"),
+                        "time_start": str(getattr(s, "time_start", None)),
+                        "time_end": str(getattr(s, "time_end", None)),
+                        "total_value": total_value,
+                        "currency": "USD",
+                        "source": "SubscribedServiceClient",
+                    })
+            if result:
+                return result
+        except Exception as exc:
+            errors.append(f"SubscribedServiceClient: {exc}")
+
+        # ── Attempt 3: osp_gateway SubscriptionServiceClient ─────────────────
+        try:
+            import oci.osp_gateway  # noqa: PLC0415
+            region = self.config.get("region", "us-ashburn-1")
+            osp_client = oci.osp_gateway.SubscriptionServiceClient(
+                self.config,
+                timeout=_timeout,
+                service_endpoint="https://ospap.oracle.com/20191001",
+            )
+            response = osp_client.list_subscriptions(
+                osp_home_region=region,
+                compartment_id=self.tenancy_id,
+            )
+            result = []
+            for s in (response.data.items or []):
+                total_value = float(getattr(s, "total_cost", 0) or 0)
+                if total_value > 0:
+                    result.append({
+                        "id": str(getattr(s, "id", "") or ""),
+                        "status": str(getattr(s, "subscription_type", "") or ""),
+                        "subscription_type": str(getattr(s, "subscription_type", "") or "ANNUAL_UNIVERSAL"),
+                        "time_start": str(getattr(s, "time_plan_ended", None)),
+                        "time_end": str(getattr(s, "time_personal_to_corporate_conv", None)),
+                        "total_value": total_value,
+                        "currency": "USD",
+                        "source": "osp_gateway",
+                    })
+            if result:
+                return result
+        except Exception as exc:
+            errors.append(f"osp_gateway: {exc}")
+
+        # All attempts failed or returned empty — raise to surface the diagnostics
+        if errors:
+            raise RuntimeError(" | ".join(errors))
+        return []
 
 
 # Singleton instance
