@@ -57,4 +57,3 @@ docker compose up -d --build
 
 - No OCI calls are made from page load cost endpoints.
 - UI reads cache/aggregates first, with stale snapshot fallback.
-- Never commit secrets (`.env`, `.oci`, `*.pem`, `*.key`).
