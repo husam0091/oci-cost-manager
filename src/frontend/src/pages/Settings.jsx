@@ -21,6 +21,7 @@ import {
   adminListUsers,
   adminCreateUser,
   adminUpdateUser,
+  adminDeleteUser,
   getDataResources,
   getDataCompartmentTree,
   saveOciSettings,
@@ -87,6 +88,8 @@ function Settings({ onAuthChange, forceLogin = false }) {
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [userStatus, setUserStatus] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // user id pending delete
+  const [editUser, setEditUser] = useState(null); // user object being edited
   const [permissionOptions, setPermissionOptions] = useState({ teams: [], apps: [], envs: [], compartments: [] });
   const [newUser, setNewUser] = useState({
     username: '',
@@ -275,6 +278,34 @@ function Settings({ onAuthChange, forceLogin = false }) {
       await loadUsers();
     } catch (err) {
       setUserStatus({ type: 'error', text: err.response?.data?.detail || 'Failed to update user' });
+    }
+  };
+
+  const deleteUser = async (id) => {
+    setUserStatus(null);
+    try {
+      await adminDeleteUser(id);
+      setUserStatus({ type: 'success', text: 'User deleted' });
+      setDeleteConfirm(null);
+      await loadUsers();
+    } catch (err) {
+      setUserStatus({ type: 'error', text: err.response?.data?.error?.reason || err.response?.data?.detail || 'Failed to delete user' });
+      setDeleteConfirm(null);
+    }
+  };
+
+  const saveEditUser = async () => {
+    if (!editUser) return;
+    setUserStatus(null);
+    try {
+      const patch = { role: editUser.role, is_active: editUser.is_active };
+      if (editUser.newPassword) patch.password = editUser.newPassword;
+      await adminUpdateUser(editUser.id, patch);
+      setUserStatus({ type: 'success', text: 'User saved' });
+      setEditUser(null);
+      await loadUsers();
+    } catch (err) {
+      setUserStatus({ type: 'error', text: err.response?.data?.detail || 'Failed to save user' });
     }
   };
 
@@ -797,10 +828,37 @@ function Settings({ onAuthChange, forceLogin = false }) {
 
           <div className="rounded-2xl border border-white/60 bg-white/90 p-6 shadow-lg">
             <h3 className="mb-4 text-lg font-semibold text-slate-900">Users</h3>
+            {editUser && (
+              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <h4 className="mb-3 text-sm font-semibold text-blue-900">Edit User: {editUser.username}</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-700">Role</label>
+                    <select value={editUser.role} onChange={(e) => setEditUser((u) => ({ ...u, role: e.target.value }))} className="w-full rounded border border-slate-300 px-2 py-1 text-sm">
+                      <option value="admin">admin</option><option value="finops">finops</option><option value="engineer">engineer</option><option value="viewer">viewer</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-700">New Password (leave blank to keep)</label>
+                    <input type="password" value={editUser.newPassword || ''} onChange={(e) => setEditUser((u) => ({ ...u, newPassword: e.target.value }))} className="w-full rounded border border-slate-300 px-2 py-1 text-sm" placeholder="••••••••" />
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={Boolean(editUser.is_active)} onChange={(e) => setEditUser((u) => ({ ...u, is_active: e.target.checked }))} />
+                    Active
+                  </label>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button onClick={saveEditUser} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">Save</button>
+                  <button onClick={() => setEditUser(null)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+                </div>
+              </div>
+            )}
             {usersLoading ? <p className="text-sm text-slate-500">Loading users...</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead><tr className="border-b border-slate-200"><th className="px-3 py-2 text-left">Username</th><th className="px-3 py-2 text-left">Role</th><th className="px-3 py-2 text-left">Active</th><th className="px-3 py-2 text-left">Scopes</th></tr></thead>
+                  <thead><tr className="border-b border-slate-200"><th className="px-3 py-2 text-left">Username</th><th className="px-3 py-2 text-left">Role</th><th className="px-3 py-2 text-left">Active</th><th className="px-3 py-2 text-left">Scopes</th><th className="px-3 py-2 text-left">Actions</th></tr></thead>
                   <tbody>
                     {users.map((u) => (
                       <tr key={u.id} className="border-b border-slate-100">
@@ -812,6 +870,19 @@ function Settings({ onAuthChange, forceLogin = false }) {
                         </td>
                         <td className="px-3 py-2"><input type="checkbox" checked={Boolean(u.is_active)} onChange={(e) => updateUser(u.id, { is_active: e.target.checked })} /></td>
                         <td className="px-3 py-2 text-xs text-slate-600">teams:{(u.allowed_teams || []).length} apps:{(u.allowed_apps || []).length} envs:{(u.allowed_envs || []).length} comps:{(u.allowed_compartment_ids || []).length}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => setEditUser({ ...u, newPassword: '' })} className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200">Edit</button>
+                            {deleteConfirm === u.id ? (
+                              <>
+                                <button onClick={() => deleteUser(u.id)} className="rounded bg-rose-600 px-2 py-1 text-xs font-medium text-white hover:bg-rose-700">Confirm</button>
+                                <button onClick={() => setDeleteConfirm(null)} className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200">Cancel</button>
+                              </>
+                            ) : (
+                              <button onClick={() => setDeleteConfirm(u.id)} className="rounded bg-rose-50 px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-100">Delete</button>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

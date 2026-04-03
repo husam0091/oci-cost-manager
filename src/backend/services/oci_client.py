@@ -332,24 +332,44 @@ class OCIClientService:
             return []
 
     def list_volumes(self, compartment_id: str, availability_domain: Optional[str] = None) -> list:
-        """List block volumes in a compartment (optionally by AD)."""
+        """List block volumes in a compartment (optionally by AD), with pagination."""
+        volumes = []
         try:
-            return self.block_storage_client.list_volumes(
+            response = self.block_storage_client.list_volumes(
                 compartment_id=compartment_id,
                 availability_domain=availability_domain,
-            ).data
+            )
+            volumes.extend(response.data)
+            while response.has_next_page:
+                response = self.block_storage_client.list_volumes(
+                    compartment_id=compartment_id,
+                    availability_domain=availability_domain,
+                    page=response.next_page,
+                )
+                volumes.extend(response.data)
         except Exception:
             return []
+        return volumes
 
     def list_boot_volumes(self, compartment_id: str, availability_domain: Optional[str] = None) -> list:
-        """List boot volumes in a compartment (optionally by AD)."""
+        """List boot volumes in a compartment (optionally by AD), with pagination."""
+        boot_volumes = []
         try:
-            return self.block_storage_client.list_boot_volumes(
+            response = self.block_storage_client.list_boot_volumes(
                 compartment_id=compartment_id,
                 availability_domain=availability_domain,
-            ).data
+            )
+            boot_volumes.extend(response.data)
+            while response.has_next_page:
+                response = self.block_storage_client.list_boot_volumes(
+                    compartment_id=compartment_id,
+                    availability_domain=availability_domain,
+                    page=response.next_page,
+                )
+                boot_volumes.extend(response.data)
         except Exception:
             return []
+        return boot_volumes
 
     def list_volume_attachments(self, compartment_id: str) -> list:
         """List block volume attachments in a compartment."""
@@ -383,23 +403,55 @@ class OCIClientService:
             return []
         return attachments
 
-    def list_volume_backups(self, compartment_id: str) -> list:
-        """List block volume backups in a compartment."""
+    def list_boot_volume_attachments_by_ad(self, compartment_id: str, availability_domain: str) -> list:
+        """List boot volume attachments filtered by availability domain (required in some OCI regions)."""
+        attachments = []
         try:
-            return self.block_storage_client.list_volume_backups(
+            response = self.compute_client.list_boot_volume_attachments(
                 compartment_id=compartment_id,
-            ).data
+                availability_domain=availability_domain,
+            )
+            attachments.extend(response.data)
+            while response.has_next_page:
+                response = self.compute_client.list_boot_volume_attachments(
+                    compartment_id=compartment_id,
+                    availability_domain=availability_domain,
+                    page=response.next_page,
+                )
+                attachments.extend(response.data)
         except Exception:
             return []
+        return attachments
+
+    def list_volume_backups(self, compartment_id: str) -> list:
+        """List block volume backups in a compartment, with pagination."""
+        backups = []
+        try:
+            response = self.block_storage_client.list_volume_backups(compartment_id=compartment_id)
+            backups.extend(response.data)
+            while response.has_next_page:
+                response = self.block_storage_client.list_volume_backups(
+                    compartment_id=compartment_id, page=response.next_page
+                )
+                backups.extend(response.data)
+        except Exception:
+            return []
+        return backups
 
     def list_boot_volume_backups(self, compartment_id: str) -> list:
-        """List boot volume backups in a compartment."""
+        """List boot volume backups in a compartment, with pagination."""
+        backups = []
         try:
-            return self.block_storage_client.list_boot_volume_backups(
-                compartment_id=compartment_id,
-            ).data
+            response = self.block_storage_client.list_boot_volume_backups(compartment_id=compartment_id)
+            backups.extend(response.data)
+            while response.has_next_page:
+                response = self.block_storage_client.list_boot_volume_backups(
+                    compartment_id=compartment_id, page=response.next_page
+                )
+                backups.extend(response.data)
         except Exception:
             return []
+        return backups
 
     def get_subscriptions(self) -> list:
         """Get Universal Credit subscriptions from OCI onesubscription API.

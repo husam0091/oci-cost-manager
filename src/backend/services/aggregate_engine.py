@@ -81,8 +81,18 @@ def _waste_type(resource: Resource) -> str | None:
     rtype = (resource.type or "").lower()
     if "backup" in rtype:
         return "backup"
-    if "volume" in rtype and status in {"available", "detached", "stopped"}:
-        return "unattached_volume"
+    if "volume" in rtype:
+        details = resource.details or {}
+        is_attached = details.get("is_attached")
+        # If the scanner recorded attachment state, trust it over lifecycle_state.
+        # OCI volumes report lifecycle_state=AVAILABLE whether attached or not.
+        if is_attached is True:
+            return None
+        if is_attached is False:
+            return "unattached_volume"
+        # Fallback: no is_attached recorded — use lifecycle_state heuristic
+        if status in {"detached", "stopped"}:
+            return "unattached_volume"
     return None
 
 

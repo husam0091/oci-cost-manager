@@ -18,6 +18,7 @@ async def data_resources(
     team: Optional[str] = Query(None),
     app: Optional[str] = Query(None),
     unowned_only: bool = Query(False),
+    search: Optional[str] = Query(None, description="search by name or IP (case-insensitive, partial match)"),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -27,6 +28,14 @@ async def data_resources(
         q = q.filter(Resource.compartment_id == compartment_id)
     if type:
         q = q.filter(Resource.type == type)
+    if search:
+        from sqlalchemy import func, cast
+        from sqlalchemy import String
+        term = f"%{search.strip()}%"
+        q = q.filter(
+            Resource.name.ilike(term) |
+            cast(Resource.details["private_ip"], String).ilike(term)
+        )
     total = q.count()
     rows = q.order_by(Resource.name.asc()).offset(offset).limit(limit).all()
     rules = load_enabled_rules(db)

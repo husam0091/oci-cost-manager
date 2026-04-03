@@ -104,6 +104,7 @@ def upsert_resources(db: Session) -> int:
     ad_names = [ad.name for ad in availability_domains]
 
     # Build tenancy-wide attachment maps first to avoid cross-compartment false UNATTACHED labels.
+    # Boot volume attachments require availability_domain in some OCI regions, so we iterate all ADs.
     attached_vol_ids_global: set[str] = set()
     attached_boot_ids_global: set[str] = set()
     attached_states = {"ATTACHED", "ATTACHING", "DETACHING"}
@@ -124,7 +125,16 @@ def upsert_resources(db: Session) -> int:
                 if bvol_id and state in attached_states:
                     attached_boot_ids_global.add(bvol_id)
         except Exception:
-            pass
+            # Fallback: some OCI regions require availability_domain for boot volume attachments
+            for ad_name in ad_names:
+                try:
+                    for att in oci_client.list_boot_volume_attachments_by_ad(comp_id, ad_name):
+                        state = str(getattr(att, "lifecycle_state", "") or "").upper()
+                        bvol_id = getattr(att, "boot_volume_id", None)
+                        if bvol_id and state in attached_states:
+                            attached_boot_ids_global.add(bvol_id)
+                except Exception:
+                    pass
 
     for comp in comps:
         comp_id = comp.id
@@ -424,7 +434,8 @@ def snapshot_costs_and_trends(db: Session):
 
 
 def enrich_resource_types_from_cost_signatures(db: Session):
-    """Fallback classification when OCI image metadata is incomplete."""
+    """Fallback classification when OCI image metadata is incomplete.
+    Also stores monthly_cost in resource details so aggregate_engine can use it."""
     calc = get_cost_calculator()
     today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = today.replace(day=1)
@@ -439,6 +450,7 @@ def enrich_resource_types_from_cost_signatures(db: Session):
             continue
         skus = item.get("skus") or []
         sku_text = " ".join((s.get("sku_name") or "").lower() for s in skus)
+        monthly_cost = item.get("total_cost") or 0
 
         detected_type = None
         if "sql server" in sku_text or "microsoft sql" in sku_text:
@@ -452,17 +464,16 @@ def enrich_resource_types_from_cost_signatures(db: Session):
         elif "backup" in sku_text:
             detected_type = "volume_backup"
 
-        if not detected_type:
-            continue
-
         row = db.query(Resource).filter(Resource.ocid == rid).one_or_none()
         if row:
-            if row.type == "compute":
+            details = dict(row.details or {})
+            if monthly_cost:
+                details["monthly_cost"] = monthly_cost
+            if detected_type and row.type == "compute":
                 row.type = detected_type
-                details = dict(row.details or {})
                 details["classified_by"] = "cost_signature"
-                row.details = details
-        else:
+            row.details = details
+        elif detected_type:
             db.add(Resource(
                 ocid=rid,
                 name=rid.split(".")[-1] if "." in rid else rid,
@@ -470,7 +481,7 @@ def enrich_resource_types_from_cost_signatures(db: Session):
                 compartment_id="unknown",
                 status="UNKNOWN",
                 shape=None,
-                details={"classified_by": "cost_signature"},
+                details={"classified_by": "cost_signature", "monthly_cost": monthly_cost},
             ))
     db.commit()
 

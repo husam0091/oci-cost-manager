@@ -244,7 +244,7 @@ def _legacy_snapshot_fallback(db: Session, section: str) -> tuple[dict | list | 
     """
     row = (
         db.query(CostSnapshot)
-        .filter(CostSnapshot.period == "monthly", CostSnapshot.total > 0)
+        .filter(CostSnapshot.by_service.isnot(None))
         .order_by(desc(CostSnapshot.computed_at))
         .first()
     )
@@ -372,7 +372,12 @@ async def cost_by_compartment(
         return _response({"items": payload}, source="snapshot", stale=True, message="Using last available snapshot")
     items = _breakdown_from_aggregates(db, range, "compartment", limit)
     if not items:
-        return _response({"items": []}, source="aggregate", stale=True, message="Using last available snapshot")
+        legacy_items, has_legacy = _legacy_snapshot_fallback(db, "by_compartment")
+        if has_legacy and isinstance(legacy_items, list):
+            payload = legacy_items[:limit]
+            cache_set(cache_key, payload, BREAKDOWN_TTL)
+            return _response({"items": payload}, source="legacy_snapshot", stale=True, message="Using last available snapshot")
+        return _response({"items": []}, source="aggregate", stale=True, message="No cost data available")
     cache_set(cache_key, items, BREAKDOWN_TTL)
     return _response({"items": items}, source="aggregate")
 

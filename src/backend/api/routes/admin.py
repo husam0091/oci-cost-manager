@@ -2115,3 +2115,17 @@ async def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depend
         row.is_active = bool(req.is_active)
     db.commit()
     return {"success": True}
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: int, db: Session = Depends(get_db), user=Depends(_require_admin)):
+    row = db.query(UserAccount).filter(UserAccount.id == user_id).one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="user not found")
+    if row.role == "admin":
+        active_admins = db.query(UserAccount).filter(UserAccount.role == "admin", UserAccount.is_active == True).count()
+        if active_admins <= 1:
+            raise HTTPException(status_code=400, detail="cannot delete last active admin")
+    db.delete(row)
+    db.commit()
+    return {"success": True}

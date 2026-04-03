@@ -486,3 +486,4 @@ export const adminUploadPortalSsl = (formData, config = {}) => api.post('/settin
 export const adminListUsers = () => api.get('/admin/users');
 export const adminCreateUser = (data) => api.post('/admin/users', data);
 export const adminUpdateUser = (userId, data) => api.put(`/admin/users/${encodeURIComponent(userId)}`, data);
+export const adminDeleteUser = (userId) => api.delete(`/admin/users/${encodeURIComponent(userId)}`);
