@@ -78,8 +78,8 @@ services:
       PORTAL_SSL_DIR: "/app/portal-ssl"
     volumes:
       - ${OCI_CONFIG_DIR:-/etc/oci-cost-manager/oci}:/home/app/.oci:ro
-      - /etc/oci-cost-manager/ssl:/app/portal-ssl
-      - ../y/reports:/exports
+      - ${SSL_DIR:-/etc/oci-cost-manager/ssl}:/app/portal-ssl
+      - D:/my-lab/oci-test-reports:/exports
     depends_on:
       pgbouncer:
         condition: service_started
