@@ -19,6 +19,7 @@ async def data_resources(
     app: Optional[str] = Query(None),
     unowned_only: bool = Query(False),
     search: Optional[str] = Query(None, description="search by name or IP (case-insensitive, partial match)"),
+    region: Optional[str] = Query(None, description="filter by OCI region"),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -26,6 +27,8 @@ async def data_resources(
     q = db.query(Resource)
     if compartment_id:
         q = q.filter(Resource.compartment_id == compartment_id)
+    if region and region != "all":
+        q = q.filter(Resource.region == region)
     if type:
         q = q.filter(Resource.type == type)
     if search:
@@ -41,7 +44,7 @@ async def data_resources(
     rules = load_enabled_rules(db)
     data = [{
         "id": r.ocid, "name": r.name, "type": r.type, "compartment_id": r.compartment_id,
-        "status": r.status, "shape": r.shape, "details": r.details
+        "region": r.region, "status": r.status, "shape": r.shape, "details": r.details
     } for r in rows]
     enriched = []
     for item, model in zip(data, rows):

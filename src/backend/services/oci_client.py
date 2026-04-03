@@ -17,7 +17,7 @@ from services.oci_credentials import get_oci_runtime_credentials
 class OCIClientService:
     """Service for managing OCI SDK clients."""
     
-    def __init__(self, profile_name: Optional[str] = None, runtime_oci: Optional[dict[str, Any]] = None):
+    def __init__(self, profile_name: Optional[str] = None, runtime_oci: Optional[dict[str, Any]] = None, region_override: Optional[str] = None):
         """Initialize OCI client service.
         
         Args:
@@ -30,6 +30,7 @@ class OCIClientService:
         runtime_path = runtime.get("config_file")
         self.config_path = Path(runtime_path).expanduser() if runtime_path else get_oci_config_path()
         self.runtime_oci = runtime
+        self.region_override = region_override
         self._config = None
         self._identity_client = None
         self._database_client = None
@@ -54,6 +55,8 @@ class OCIClientService:
                     raise_production_block("oci_config_file", None)
                 self._config = _load_config_profile(str(self.config_path), self.profile_name)
             _normalize_key_file_path(self._config)
+            if self.region_override:
+                self._config["region"] = self.region_override
             oci.config.validate_config(self._config)
         return self._config
     
@@ -589,6 +592,11 @@ def test_oci_connection(runtime_oci: Optional[dict[str, Any]] = None) -> dict:
         "region": client.region,
         "auth_mode": client.auth_mode,
     }
+
+
+def get_oci_client_for_region(region: str) -> OCIClientService:
+    """Create a fresh OCI client with the given region override (not cached)."""
+    return OCIClientService(region_override=region)
 
 
 def reset_oci_client() -> None:

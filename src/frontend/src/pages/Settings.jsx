@@ -30,9 +30,11 @@ import {
   getMe,
   adminGetPortalSslSettings,
   adminUploadPortalSsl,
+  adminGetRegions,
+  adminUpdateRegions,
 } from '../services/api';
 
-function Settings({ onAuthChange, forceLogin = false }) {
+function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
   const [activeTab, setActiveTab] = useState('integration');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -65,6 +67,9 @@ function Settings({ onAuthChange, forceLogin = false }) {
   const [portalPfxFile, setPortalPfxFile] = useState(null);
   const [portalPfxPassword, setPortalPfxPassword] = useState('');
   const [portalUploading, setPortalUploading] = useState(false);
+  const [enabledRegions, setEnabledRegions] = useState([]);
+  const [newRegion, setNewRegion] = useState('');
+  const [regionsLoading, setRegionsLoading] = useState(false);
 
   const [scanRuns, setScanRuns] = useState([]);
   const [scanRunning, setScanRunning] = useState(false);
@@ -133,6 +138,11 @@ function Settings({ onAuthChange, forceLogin = false }) {
           setOciTenancy(data.oci_tenancy || '');
           setOciRegion(data.oci_region || '');
           setOciLastTestStatus(data.oci_last_test_status || null);
+          // Load enabled regions
+          try {
+            const regRes = await adminGetRegions();
+            if (regRes.data?.success) setEnabledRegions(regRes.data.data.enabled_regions || []);
+          } catch { /* ignore */ }
           setOciLastTestedAt(data.oci_last_tested_at || null);
           setNotificationsEmailEnabled(Boolean(data.notifications_email_enabled));
           setNotificationsSmtpHost(data.notifications_smtp_host || '');
@@ -565,6 +575,63 @@ function Settings({ onAuthChange, forceLogin = false }) {
               <button onClick={handleTestConnection} disabled={testingConnection} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white">{testingConnection ? 'Testing...' : 'Test Connection'}</button>
               <button onClick={handleSaveSettings} disabled={settingsLoading} className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white">{settingsLoading ? 'Saving...' : 'Save Settings'}</button>
             </div>
+
+            {/* Multi-Region Configuration */}
+            <div className="mt-6 rounded-xl border border-slate-200 p-4">
+              <h4 className="mb-1 text-sm font-semibold text-slate-800">Additional Scan Regions</h4>
+              <p className="mb-3 text-xs text-slate-500">The primary region above is always scanned. Add extra OCI regions to include in each scan.</p>
+              {ociRegion && (
+                <div className="mb-2 flex items-center gap-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">
+                  <span className="font-medium">Primary:</span> {ociRegion}
+                </div>
+              )}
+              {enabledRegions.map((r) => (
+                <div key={r} className="mb-1.5 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                  <span className="font-mono text-slate-700">{r}</span>
+                  <button
+                    onClick={async () => {
+                      const updated = enabledRegions.filter((x) => x !== r);
+                      setRegionsLoading(true);
+                      try {
+                        await adminUpdateRegions({ enabled_regions: updated });
+                        setEnabledRegions(updated);
+                        if (onRegionsChange) onRegionsChange([ociRegion, ...updated].filter(Boolean));
+                      } finally { setRegionsLoading(false); }
+                    }}
+                    className="text-xs text-rose-500 hover:text-rose-700"
+                  >Remove</button>
+                </div>
+              ))}
+              <div className="mt-2 flex gap-2">
+                <input
+                  type="text"
+                  value={newRegion}
+                  onChange={(e) => setNewRegion(e.target.value)}
+                  placeholder="e.g. eu-frankfurt-1"
+                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.closest('div').querySelector('button').click()}
+                />
+                <button
+                  disabled={!newRegion.trim() || regionsLoading}
+                  onClick={async () => {
+                    const r = newRegion.trim().toLowerCase();
+                    if (!r || enabledRegions.includes(r) || r === ociRegion) return;
+                    const updated = [...enabledRegions, r];
+                    setRegionsLoading(true);
+                    try {
+                      await adminUpdateRegions({ enabled_regions: updated });
+                      setEnabledRegions(updated);
+                      setNewRegion('');
+                      if (onRegionsChange) onRegionsChange([ociRegion, ...updated].filter(Boolean));
+                    } finally { setRegionsLoading(false); }
+                  }}
+                  className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {regionsLoading ? '...' : 'Add'}
+                </button>
+              </div>
+            </div>
+
             <div className="mt-6 rounded-xl border border-slate-200 p-4">
               <h4 className="mb-3 text-sm font-semibold text-slate-800">Notifications (opt-in)</h4>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

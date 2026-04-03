@@ -78,7 +78,7 @@ services:
       PORTAL_SSL_DIR: "/app/portal-ssl"
     volumes:
       - ${OCI_CONFIG_DIR:-/etc/oci-cost-manager/oci}:/home/app/.oci:ro
-      - ${SSL_DIR:-/etc/oci-cost-manager/ssl}:/app/portal-ssl
+      - portal_ssl:/app/portal-ssl
       - exports:/exports
     depends_on:
       pgbouncer:
@@ -120,6 +120,9 @@ services:
     container_name: oci-cost-manager-frontend
     ports:
       - "8080:8080"
+      - "8443:8443"
+    volumes:
+      - portal_ssl:/etc/nginx/ssl:ro
     depends_on:
       - backend
     networks:
@@ -129,6 +132,7 @@ services:
 volumes:
   pgdata:
   exports:
+  portal_ssl:
 
 networks:
   app_internal:

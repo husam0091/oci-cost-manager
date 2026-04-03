@@ -27,7 +27,7 @@ import Recommendations from './pages/Recommendations';
 import Actions from './pages/Actions';
 import Logs from './pages/Logs';
 import GlobalStatusBar from './components/GlobalStatusBar';
-import { getMe } from './services/api';
+import { getMe, adminGetRegions } from './services/api';
 
 const PERSONA_ORDER = {
   Executive: ['/', '/budget', '/exports', '/costs', '/recommendations', '/governance', '/resources', '/actions', '/logs', '/settings'],
@@ -142,6 +142,8 @@ function AppLayout() {
   const [appVersion, setAppVersion] = useState('1.0.0');
   const [demoMode, setDemoMode] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [activeRegion, setActiveRegion] = useState(localStorage.getItem('ui_active_region') || 'all');
+  const [availableRegions, setAvailableRegions] = useState([]);
 
   useEffect(() => {
     let mounted = true;
@@ -155,6 +157,14 @@ function AppLayout() {
           setRole(me.data?.data?.role || 'viewer');
           setAppVersion(me.data?.data?.app_version || '1.0.0');
           setDemoMode(parseBooleanFlag(me.data?.data?.feature_flags?.enable_demo_mode));
+          try {
+            const regRes = await adminGetRegions();
+            if (regRes.data?.success) {
+              const { primary_region, enabled_regions } = regRes.data.data;
+              const all = [...new Set([primary_region, ...(enabled_regions || [])].filter(Boolean))];
+              setAvailableRegions(all);
+            }
+          } catch { /* regions endpoint requires admin — ignore for non-admin */ }
         } else {
           setAuthenticated(false);
         }
@@ -238,6 +248,21 @@ function AppLayout() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {availableRegions.length > 0 && (
+                  <select
+                    value={activeRegion}
+                    onChange={(e) => {
+                      setActiveRegion(e.target.value);
+                      localStorage.setItem('ui_active_region', e.target.value);
+                    }}
+                    className="hidden rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs font-medium text-sky-700 sm:block"
+                  >
+                    <option value="all">All Regions</option>
+                    {availableRegions.map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                )}
                 <select
                   value={persona}
                   onChange={(e) => {
@@ -265,15 +290,15 @@ function AppLayout() {
           <section className="p-4 lg:p-8">
             <GlobalStatusBar />
             <Routes>
-              <Route path="/" element={<Dashboard persona={persona} />} />
-              <Route path="/resources" element={<Resources />} />
-              <Route path="/costs" element={<Costs />} />
-              <Route path="/budget" element={<Budget />} />
-              <Route path="/exports" element={<ExportReports />} />
-              <Route path="/governance" element={<Governance />} />
-              <Route path="/recommendations" element={<Recommendations />} />
-              <Route path="/actions" element={<Actions />} />
-              <Route path="/logs" element={<Logs role={role} />} />
+              <Route path="/" element={<Dashboard persona={persona} activeRegion={activeRegion} />} />
+              <Route path="/resources" element={<Resources activeRegion={activeRegion} />} />
+              <Route path="/costs" element={<Costs activeRegion={activeRegion} />} />
+              <Route path="/budget" element={<Budget activeRegion={activeRegion} />} />
+              <Route path="/exports" element={<ExportReports activeRegion={activeRegion} />} />
+              <Route path="/governance" element={<Governance activeRegion={activeRegion} />} />
+              <Route path="/recommendations" element={<Recommendations activeRegion={activeRegion} />} />
+              <Route path="/actions" element={<Actions activeRegion={activeRegion} />} />
+              <Route path="/logs" element={<Logs role={role} activeRegion={activeRegion} />} />
               <Route
                 path="/settings"
                 element={
@@ -282,6 +307,7 @@ function AppLayout() {
                       setAuthenticated(value);
                       if (username) setProfileName(username);
                     }}
+                    onRegionsChange={(regions) => setAvailableRegions(regions)}
                   />
                 }
               />

@@ -11,12 +11,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN addgroup --system app && adduser --system --ingroup app --uid 10001 app \
-    && mkdir -p /home/app/.oci /data /exports /tmp \
-    && chown -R app:app /app /home/app /data /exports /tmp
-
-USER app:app
+RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/* \
+    && addgroup --system app && adduser --system --ingroup app --uid 10001 app \
+    && mkdir -p /home/app/.oci /data /exports /tmp /app/portal-ssl \
+    && chown -R app:app /app /home/app /data /exports /tmp \
+    && chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 8000
 
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

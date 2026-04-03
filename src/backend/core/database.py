@@ -43,6 +43,7 @@ def init_db() -> None:
     _ensure_resource_schema()
     _ensure_phase4_schema()
     _ensure_phase5_schema()
+    _ensure_multiregion_schema()
     _ensure_sqlite_indexes()
 
 
@@ -358,6 +359,24 @@ def _ensure_resource_schema() -> None:
             except Exception:
                 # JSON1 may not be available in every SQLite build.
                 pass
+    except Exception:
+        pass
+
+
+def _ensure_multiregion_schema() -> None:
+    """Add region column to resources and oci_enabled_regions to settings (idempotent)."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE resources ADD COLUMN IF NOT EXISTS region VARCHAR(64)"
+            ))
+    except Exception:
+        pass
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE settings ADD COLUMN IF NOT EXISTS oci_enabled_regions JSON"
+            ))
     except Exception:
         pass
 

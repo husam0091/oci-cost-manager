@@ -7,7 +7,8 @@ import re
 from sqlalchemy.orm import Session
 
 from core.models import AllocationRule, Compartment, Resource, CostSnapshot, TrendPoint, ScanRun, JobRun
-from services.oci_client import get_oci_client
+from core.models import Setting
+from services.oci_client import get_oci_client, get_oci_client_for_region
 from services.cost_calculator import get_cost_calculator
 from services.allocation import evaluate_allocation, load_enabled_rules
 from services.budget_engine import evaluate_budget_statuses
@@ -43,14 +44,14 @@ def upsert_compartments(db: Session):
 
 
 def _upsert_resource_row(db: Session, *, ocid: str, name: str, type_: str, compartment_id: str,
-                          status: str, shape: str | None, details: Dict[str, Any]) -> None:
+                          status: str, shape: str | None, details: Dict[str, Any], region: str | None = None) -> None:
     details = dict(details or {})
     details.setdefault("match_confidence", "medium")
     details.setdefault("match_reason", "scanner_default")
     row = db.query(Resource).filter(Resource.ocid == ocid).one_or_none()
     if not row:
         row = Resource(ocid=ocid, name=name, type=type_, compartment_id=compartment_id,
-                       status=status, shape=shape, details=details)
+                       status=status, shape=shape, details=details, region=region)
         db.add(row)
     else:
         row.name = name
@@ -59,6 +60,8 @@ def _upsert_resource_row(db: Session, *, ocid: str, name: str, type_: str, compa
         row.status = status
         row.shape = shape
         row.details = details
+        if region:
+            row.region = region
 
 
 def _detect_image_profile(image_name: str | None) -> dict:
@@ -93,11 +96,38 @@ def _format_bytes(size_bytes: int | None) -> str | None:
     return f"{size_bytes:.1f} PB"
 
 
+def _get_enabled_regions(db: Session) -> list[str]:
+    """Return ordered list of regions to scan (primary first, then additional)."""
+    s = db.query(Setting).filter(Setting.id == 1).one_or_none()
+    primary = (s.oci_region if s else None) or get_oci_client().region
+    extra = list(s.oci_enabled_regions or []) if s else []
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    result: list[str] = []
+    for r in [primary] + extra:
+        if r and r not in seen:
+            seen.add(r)
+            result.append(r)
+    return result
+
+
 def upsert_resources(db: Session) -> int:
-    oci_client = get_oci_client()
+    regions = _get_enabled_regions(db)
     comps = db.query(Compartment).all()
     count = 0
-    
+
+    for region in regions:
+        oci_client = get_oci_client_for_region(region)
+        _scan_region(db, oci_client, comps, region)
+        db.flush()
+
+    db.commit()
+    return count
+
+
+def _scan_region(db: Session, oci_client, comps, region: str) -> int:
+    count = 0
+
     # Cache availability domains (needed for file storage)
     tenancy_id = oci_client.tenancy_id
     availability_domains = oci_client.list_availability_domains(tenancy_id)
@@ -151,7 +181,8 @@ def upsert_resources(db: Session) -> int:
                                          "cpu_core_count": getattr(dbs, "cpu_core_count", None),
                                          "data_storage_size_in_gbs": getattr(dbs, "data_storage_size_in_gbs", None),
                                          "node_count": getattr(dbs, "node_count", None),
-                                     })
+                                     },
+                                     region=region)
                 count += 1
         except Exception:
             pass
@@ -165,7 +196,8 @@ def upsert_resources(db: Session) -> int:
                                      details={
                                          "mysql_version": getattr(m, "mysql_version", None),
                                          "is_heat_wave_cluster_attached": getattr(m, "is_heat_wave_cluster_attached", False),
-                                     })
+                                     },
+                                     region=region)
                 count += 1
         except Exception:
             pass
@@ -184,7 +216,8 @@ def upsert_resources(db: Session) -> int:
                                          "db_workload": getattr(adb, "db_workload", None),
                                          "cpu_core_count": getattr(adb, "cpu_core_count", None),
                                          "data_storage_size_in_tbs": getattr(adb, "data_storage_size_in_tbs", None),
-                                     })
+                                     },
+                                     region=region)
                 count += 1
         except Exception:
             pass
@@ -233,7 +266,8 @@ def upsert_resources(db: Session) -> int:
                                          "image_family": profile["image_family"],
                                          "image_vendor": profile["image_vendor"],
                                          "time_created": str(getattr(inst, "time_created", None)),
-                                     })
+                                     },
+                                     region=region)
                 count += 1
         except Exception:
             pass
@@ -272,7 +306,8 @@ def upsert_resources(db: Session) -> int:
                                              "protocol": "NFS",
                                              "exports": export_map.get(getattr(fs, "id", None), []),
                                              "time_created": str(getattr(fs, "time_created", None)),
-                                         })
+                                         },
+                                     region=region)
                     count += 1
             except Exception:
                 pass
@@ -302,6 +337,7 @@ def upsert_resources(db: Session) -> int:
                             "attachment_state": "ATTACHED" if attached else "UNATTACHED",
                             "time_created": str(getattr(vol, "time_created", None)),
                         },
+                        region=region,
                     )
                     count += 1
 
@@ -324,6 +360,7 @@ def upsert_resources(db: Session) -> int:
                             "attachment_state": "ATTACHED" if attached else "UNATTACHED",
                             "time_created": str(getattr(bvol, "time_created", None)),
                         },
+                        region=region,
                     )
                     count += 1
         except Exception:
@@ -348,6 +385,7 @@ def upsert_resources(db: Session) -> int:
                         "backup_type": getattr(vb, "type", None),
                         "time_created": str(getattr(vb, "time_created", None)),
                     },
+                    region=region,
                 )
                 count += 1
         except Exception:
@@ -372,6 +410,7 @@ def upsert_resources(db: Session) -> int:
                         "backup_type": getattr(bvb, "type", None),
                         "time_created": str(getattr(bvb, "time_created", None)),
                     },
+                    region=region,
                 )
                 count += 1
         except Exception:
@@ -396,12 +435,12 @@ def upsert_resources(db: Session) -> int:
                                          "approximate_size": approx_size,
                                          "size_display": _format_bytes(approx_size),
                                          "time_created": str(getattr(bucket, "time_created", None)),
-                                     })
+                                     },
+                                     region=region)
                 count += 1
         except Exception:
             pass
-    
-    db.commit()
+
     return count
 
 

@@ -33,6 +33,7 @@ class Setting(Base):
     oci_fingerprint = Column(String(128), nullable=True)
     oci_tenancy = Column(String(255), nullable=True)
     oci_region = Column(String(64), nullable=True)
+    oci_enabled_regions = Column(JSON, nullable=True)  # list of additional region strings
     oci_key_file = Column(String(512), nullable=True)
     oci_key_content = Column(Text, nullable=True)
     oci_pass_phrase = Column(String(512), nullable=True)
@@ -115,6 +116,7 @@ class Resource(Base):
     name = Column(String(255), nullable=False)
     type = Column(String(64), index=True)
     compartment_id = Column(String(255), index=True)
+    region = Column(String(64), index=True, nullable=True)
     status = Column(String(64))
     shape = Column(String(128))
     details = Column(JSON)

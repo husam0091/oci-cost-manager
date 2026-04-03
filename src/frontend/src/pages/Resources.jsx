@@ -55,6 +55,63 @@ function resourceNameFromCostRow(row) {
   return `Resource ${short}`;
 }
 
+function detectLicense(resource) {
+  const d = resource.details || {};
+  const img = (d.image_name || '').toLowerCase();
+  const rtype = (resource.type || '').toLowerCase();
+  const ocpus = d.cpu_core_count ?? d.ocpus ?? 2;
+
+  if (img.includes('bigip') || img.includes('big-ip')) {
+    return { vendor: 'F5', product: 'BIG-IP', costPerMonth: Math.round((ocpus || 4) * 250) };
+  }
+  if (img.includes('panorama')) {
+    return { vendor: 'Palo Alto', product: 'Panorama', costPerMonth: Math.round((ocpus || 4) * 200) };
+  }
+  if (img.includes('vm-series') || img.includes('vmseries')) {
+    return { vendor: 'Palo Alto', product: 'VM-Series', costPerMonth: Math.round((ocpus || 4) * 300) };
+  }
+  if (img.includes('forti')) {
+    const m = img.match(/(\d+)\s*ocpu/) || img.match(/payg[_-]?(\d+)/);
+    const licOcpus = m ? parseInt(m[1], 10) : (ocpus || 4);
+    return { vendor: 'Fortinet', product: `FortiGate PAYG ${licOcpus} OCPU`, costPerMonth: Math.round(licOcpus * 280) };
+  }
+  if (img.includes('sql') && (img.includes('-ent') || img.includes('enterprise'))) {
+    return { vendor: 'Microsoft', product: 'SQL Server Enterprise', costPerMonth: Math.round((ocpus || 4) * 360) };
+  }
+  if (img.includes('sql') || rtype === 'sql_server') {
+    return { vendor: 'Microsoft', product: 'SQL Server Standard', costPerMonth: Math.round((ocpus || 4) * 108) };
+  }
+  if (img.includes('windows') || rtype === 'windows_server') {
+    return { vendor: 'Microsoft', product: 'Windows Server', costPerMonth: Math.round((ocpus || 2) * 22) };
+  }
+  return null;
+}
+
+// Estimates cost for resource types that have no OCI cost data in aggregates
+function estimateMissingCost(resource) {
+  const rtype = (resource.type || '').toLowerCase();
+  const d = resource.details || {};
+  const shape = (resource.shape || '');
+
+  if (rtype === 'mysql') {
+    // Parse OCPU count from shape: "MySQL.64" → 64, "MySQL.VM.Standard.E3.8.64GB" → 8
+    const m = shape.match(/^MySQL\.(\d+)$/i) || shape.match(/\.(\d+)\.\d+GB/i);
+    const ocpus = m ? parseInt(m[1], 10) : 4;
+    let cost = Math.round(ocpus * 84); // ~$84/OCPU/month
+    if (d.is_heat_wave_cluster_attached) cost += 2200; // ~$2,200/HeatWave node
+    const label = d.is_heat_wave_cluster_attached ? `MySQL HeatWave (${ocpus} OCPU)` : `MySQL (${ocpus} OCPU)`;
+    return { vendor: 'OCI', product: label, costPerMonth: cost };
+  }
+
+  if (rtype === 'boot_volume_backup' || rtype === 'volume_backup') {
+    const gb = d.size_in_gbs || 0;
+    if (!gb) return null;
+    return { vendor: 'OCI', product: `Backup Storage (${gb} GB)`, costPerMonth: Math.round(gb * 0.026) };
+  }
+
+  return null;
+}
+
 function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
   const config = typeConfig[resource.type] || { icon: HardDrive, color: 'bg-gray-100', label: resource.type };
   const Icon = config.icon;
@@ -63,7 +120,18 @@ function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
     : (resource.name?.trim() || 'Unnamed resource');
 
   const d = resource.details || {};
-  const monthlyCost = monthlyCostProp ?? d.monthly_cost ?? d.total_cost_estimate ?? null;
+  const ociCost = monthlyCostProp != null && monthlyCostProp > 0 ? monthlyCostProp
+    : (d.monthly_cost ?? d.total_cost_estimate ?? null);
+  const license = detectLicense(resource);
+  const licenseCost = license?.costPerMonth ?? null;
+  // For types where OCI aggregates return $0, fall back to estimation
+  const missingEst = (ociCost == null || ociCost === 0) && licenseCost == null
+    ? estimateMissingCost(resource)
+    : null;
+  const missingCost = missingEst?.costPerMonth ?? null;
+  const monthlyCost = ociCost != null || licenseCost != null || missingCost != null
+    ? (ociCost ?? 0) + (licenseCost ?? 0) + (missingCost ?? 0)
+    : null;
   const storageGb = d.size_in_gbs ?? d.data_storage_size_in_gbs ?? null;
   const ocpus = d.cpu_core_count ?? d.ocpus ?? null;
   const isHealthy = ['AVAILABLE', 'RUNNING', 'ACTIVE'].includes(resource.status);
@@ -90,9 +158,29 @@ function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
 
       {/* Monthly cost — prominent row */}
       {monthlyCost != null && (
-        <div className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-          <span className="text-xs font-medium text-slate-500">Est. Monthly Cost</span>
-          <span className="text-sm font-bold text-slate-800">${monthlyCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+        <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-500">Est. Monthly Cost</span>
+            <span className="text-sm font-bold text-slate-800">${monthlyCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+          </div>
+          {ociCost != null && ociCost > 0 && licenseCost != null && (
+            <div className="mt-1 flex items-center justify-between">
+              <span className="text-[11px] text-slate-400">OCI compute</span>
+              <span className="text-xs text-slate-500">${ociCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+            </div>
+          )}
+          {licenseCost != null && (
+            <div className={`flex items-center justify-between ${ociCost != null && ociCost > 0 ? '' : 'mt-1'}`}>
+              <span className="text-[11px] text-slate-400">{license.vendor} {license.product}</span>
+              <span className="text-xs text-slate-500">~${licenseCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+            </div>
+          )}
+          {missingCost != null && (
+            <div className="mt-1 flex items-center justify-between">
+              <span className="text-[11px] text-slate-400">{missingEst.vendor} {missingEst.product}</span>
+              <span className="text-xs text-amber-600">~${missingCost.toLocaleString(undefined, { maximumFractionDigits: 0 })} est.</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -244,7 +332,7 @@ function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
   );
 }
 
-function Resources() {
+function Resources({ activeRegion = 'all' }) {
   const [loading, setLoading] = useState(true);
   const [resources, setResources] = useState([]);
   const [filter, setFilter] = useState('all');
@@ -277,6 +365,7 @@ function Resources() {
         ...(filter !== 'all' ? { type: filter } : {}),
         ...(compartmentId ? { compartment_id: compartmentId } : {}),
         ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
+        ...(activeRegion && activeRegion !== 'all' ? { region: activeRegion } : {}),
         limit: searchQuery.trim() ? 5000 : 1000,
       };
       const [res, costRes] = await Promise.all([
@@ -342,7 +431,7 @@ function Resources() {
 
   useEffect(() => {
     fetchResources();
-  }, [filter, compartmentId, period, refreshTick, searchQuery]);
+  }, [filter, compartmentId, period, refreshTick, searchQuery, activeRegion]);
 
   useEffect(() => {
     const loadCounts = async () => {
@@ -390,7 +479,7 @@ function Resources() {
     } else if (p === 'past_year') {
       start.setDate(now.getDate() - 365);
     } else {
-      start.setDate(1);
+      start.setDate(now.getDate() - 30);
     }
     return { start_date: start.toISOString().slice(0, 10), end_date: end };
   };
@@ -439,6 +528,11 @@ function Resources() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Resources</h1>
           <p className="text-sm text-slate-500">OCI inventory across compartments and service types</p>
+          {activeRegion && activeRegion !== 'all' && (
+            <span className="mt-1 inline-block rounded-full bg-sky-100 px-3 py-0.5 text-xs font-medium text-sky-700">
+              Region: {activeRegion}
+            </span>
+          )}
           <p className="mt-1 text-sm font-medium text-cyan-700">Current filter cost: ${Math.round(filterCost).toLocaleString()}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -533,6 +627,21 @@ function Resources() {
           <Search size={48} className="mx-auto mb-4 text-slate-300" />
           <p className="text-slate-500">No resources match "<span className="font-medium">{searchQuery}</span>"</p>
           <button onClick={() => { setSearchInput(''); setSearchQuery(''); }} className="mt-3 text-sm text-sky-600 hover:underline">Clear search</button>
+        </div>
+      ) : activeRegion && activeRegion !== 'all' ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-12 text-center shadow-sm">
+          <Server size={48} className="mx-auto mb-4 text-amber-300" />
+          <p className="text-base font-semibold text-amber-800">No resources found in <span className="font-mono">{activeRegion}</span></p>
+          <p className="mt-2 text-sm text-amber-700">This region hasn't been scanned yet, or your tenancy has no resources there.</p>
+          <p className="mt-1 text-sm text-amber-700">Make sure your OCI tenancy is subscribed to this region, then run a scan.</p>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="mt-5 flex items-center gap-2 rounded-lg bg-amber-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 mx-auto"
+          >
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            {refreshing ? 'Scanning…' : 'Scan Now'}
+          </button>
         </div>
       ) : (
         <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-12 text-center shadow-sm">

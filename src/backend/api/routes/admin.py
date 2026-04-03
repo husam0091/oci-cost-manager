@@ -2129,3 +2129,25 @@ async def delete_user(user_id: int, db: Session = Depends(get_db), user=Depends(
     db.delete(row)
     db.commit()
     return {"success": True}
+
+
+@router.get("/regions")
+async def get_regions(db: Session = Depends(get_db), user=Depends(_require_admin)):
+    s = db.query(Setting).filter(Setting.id == 1).one_or_none()
+    primary = (s.oci_region if s else None) or ""
+    extra = list(s.oci_enabled_regions or []) if s else []
+    return {"success": True, "data": {"primary_region": primary, "enabled_regions": extra}}
+
+
+@router.put("/regions")
+async def update_regions(payload: dict, db: Session = Depends(get_db), user=Depends(_require_admin)):
+    s = db.query(Setting).filter(Setting.id == 1).one_or_none()
+    if not s:
+        raise HTTPException(status_code=500, detail="Settings row missing")
+    enabled = payload.get("enabled_regions", [])
+    # Remove primary region from the extra list (it's always included)
+    primary = s.oci_region or ""
+    extra = [r for r in enabled if r and r != primary]
+    s.oci_enabled_regions = extra or None
+    db.commit()
+    return {"success": True, "data": {"primary_region": primary, "enabled_regions": extra}}
