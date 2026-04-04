@@ -70,6 +70,17 @@ function detectLicense(resource) {
   if (img.includes('vm-series') || img.includes('vmseries')) {
     return { vendor: 'Palo Alto', product: 'VM-Series', costPerMonth: Math.round((ocpus || 4) * 300) };
   }
+  if (img.includes('fortiproxy')) {
+    const m = img.match(/(\d+)\s*ocpu/) || img.match(/payg[_-]?(\d+)/);
+    const licOcpus = m ? parseInt(m[1], 10) : (ocpus || 4);
+    return { vendor: 'Fortinet', product: `FortiProxy PAYG ${licOcpus} OCPU`, costPerMonth: Math.round(licOcpus * 180) };
+  }
+  if (img.includes('fortimanager')) {
+    return { vendor: 'Fortinet', product: 'FortiManager', costPerMonth: 500 };
+  }
+  if (img.includes('fortianalyzer')) {
+    return { vendor: 'Fortinet', product: 'FortiAnalyzer', costPerMonth: 400 };
+  }
   if (img.includes('forti')) {
     const m = img.match(/(\d+)\s*ocpu/) || img.match(/payg[_-]?(\d+)/);
     const licOcpus = m ? parseInt(m[1], 10) : (ocpus || 4);
