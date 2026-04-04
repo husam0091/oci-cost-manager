@@ -21,9 +21,20 @@ class EncryptedPayload:
     key_version: str = "v1"
 
 
+_KEY_FILE = "/app/data/.master_key"
+_PLACEHOLDER_MARKERS = ("generate_with__", "CHANGE_ME", "")
+
+
 def _load_master_key() -> bytes:
     settings = get_settings()
     raw = (settings.app_master_key or "").strip()
+
+    # Env var missing or is a placeholder — read from the persisted key file
+    if not raw or any(raw.startswith(m) for m in _PLACEHOLDER_MARKERS if m):
+        if os.path.exists(_KEY_FILE):
+            with open(_KEY_FILE) as _f:
+                raw = _f.read().strip()
+
     if not raw:
         raise RuntimeError("APP_MASTER_KEY is required for secret encryption")
     try:

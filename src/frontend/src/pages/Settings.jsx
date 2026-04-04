@@ -386,6 +386,11 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
         fingerprint: ociFingerprint,
         region: ociRegion,
       });
+      // Upload the selected PEM key if the user picked one
+      if (selectedKeyFile) {
+        await uploadOciKey(selectedKeyFile);
+        setSelectedKeyFile(null);
+      }
       if (newUsername && newUsername !== settings?.username) payload.username = newUsername;
       if (newPassword) payload.password = newPassword;
       if (scanInterval !== settings?.scan_interval_hours) payload.scan_interval_hours = scanInterval;
