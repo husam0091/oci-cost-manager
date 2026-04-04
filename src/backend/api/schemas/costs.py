@@ -28,7 +28,7 @@ class BreakdownItemModel(BaseModel):
 
 
 class BreakdownDataModel(BaseModel):
-    group_by: Literal["service", "compartment", "env", "team", "app"]
+    group_by: Literal["service", "compartment", "region", "top_resources", "sku"]
     period: AggregationPeriodModel
     totals: AggregationTotalsModel
     items: list[BreakdownItemModel]

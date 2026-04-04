@@ -185,9 +185,14 @@ async def dashboard_summary(
             loop.run_in_executor(None, _fetch_all),
             timeout=70.0,
         )
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail="OCI Usage API timed out — please retry shortly")
-    except Exception as exc:
+    except (asyncio.TimeoutError, Exception) as exc:
+        # Try returning stale cached data before raising an error
+        stale = get_cached(_cache_key(normalized_start, normalized_end, compare, region=region))
+        if stale is not None:
+            stale["stale"] = True
+            return DashboardSummaryResponse(**stale)
+        if isinstance(exc, asyncio.TimeoutError):
+            raise HTTPException(status_code=503, detail="OCI Usage API timed out — please retry shortly")
         err_str = str(exc)
         if "429" in err_str or "TooManyRequests" in err_str:
             raise HTTPException(status_code=503, detail="OCI Usage API rate-limited — please retry shortly")

@@ -19,7 +19,7 @@ from api.schemas.costs import (
 )
 from core.cache import get_cached, set_cached, clear_cache, get_cache_info
 from core.database import get_db
-from core.models import AllocationRule, CostSnapshot, Resource, ScanRun
+from core.models import AllocationRule, Compartment, CostSnapshot, Resource, ScanRun
 from services import get_cost_calculator
 from services.allocation import evaluate_allocation, load_enabled_rules
 from api.utils.dates import (
@@ -33,7 +33,7 @@ router = APIRouter()
 
 # Cache TTLs
 COST_CACHE_TTL = 3600
-AGG_CACHE_TTL = 90
+AGG_CACHE_TTL = 600
 
 
 def _is_usage_rate_limit_error(err: Exception) -> bool:
@@ -109,9 +109,11 @@ def _aggregate_resource_rows(
     resource_map: dict[str, Resource],
     rules: list[AllocationRule] | None = None,
     mapping_health: dict[str, float] | None = None,
+    compartment_name_map: dict[str, str] | None = None,
 ) -> dict[str, float]:
     grouped: dict[str, float] = {}
     rules = rules or []
+    compartment_name_map = compartment_name_map or {}
     mapping_health = mapping_health if mapping_health is not None else {"unowned_cost": 0.0, "low_confidence_cost": 0.0}
     for row in rows:
         rid = row.get("resource_id")
@@ -120,7 +122,8 @@ def _aggregate_resource_rows(
             continue
         resource = resource_map.get(rid)
         if group_by == "compartment":
-            key = row.get("compartment_name") or row.get("compartment_id") or "Unknown"
+            comp_id = (resource.compartment_id if resource else None) or row.get("compartment_id")
+            key = compartment_name_map.get(comp_id, row.get("compartment_name")) or comp_id or "Unknown"
         elif group_by == "resource":
             if resource and resource.name:
                 key = resource.name
@@ -386,6 +389,7 @@ async def get_database_costs(
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
 ):
     """Get costs specifically for database services."""
+    cache_key = f"costs_databases_{start_date or 'auto'}_{end_date or 'auto'}"
     try:
         calculator = get_cost_calculator()
         
@@ -397,7 +401,7 @@ async def get_database_costs(
         
         db_costs = calculator.get_database_costs(start, end)
         
-        return {
+        result = {
             "success": True,
             "data": {
                 "period": {
@@ -407,9 +411,17 @@ async def get_database_costs(
                 **db_costs,
             },
         }
+        set_cached(cache_key, result, COST_CACHE_TTL)
+        return result
     except HTTPException:
         raise
     except Exception as e:
+        cached = get_cached(cache_key)
+        if cached is not None:
+            cached["cached"] = True
+            return cached
+        if _is_usage_rate_limit_error(e):
+            raise HTTPException(status_code=503, detail="OCI Usage API rate-limited — please retry shortly")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -513,7 +525,7 @@ async def get_costs_summary(
 
 @router.get("/breakdown", response_model=CostsBreakdownResponse, response_model_exclude_none=True)
 async def get_costs_breakdown(
-    group_by: Literal["service", "compartment", "env", "team", "app"] = Query("service"),
+    group_by: Literal["service", "compartment", "region", "top_resources", "sku"] = Query("service"),
     start_date: str = Query(...),
     end_date: str = Query(...),
     compare: str = Query("previous"),
@@ -545,45 +557,135 @@ async def get_costs_breakdown(
     start, end_exclusive, days = parse_required_range(start_date, end_date)
     prev_start, prev_end = compute_previous_period(start, end_exclusive)
 
-    mapping_health = {"unowned_cost": 0.0, "low_confidence_cost": 0.0}
-
     def _fetch_breakdown():
         if group_by == "service":
             return (
                 calculator.get_costs_by_service(start, end_exclusive, region=region_filter),
                 calculator.get_costs_by_service(prev_start, prev_end, region=region_filter),
-                [],
-                [],
+            )
+        if group_by == "compartment":
+            return (
+                calculator.get_costs_by_compartment(start, end_exclusive, region=region_filter),
+                calculator.get_costs_by_compartment(prev_start, prev_end, region=region_filter),
+            )
+        if group_by == "region":
+            return (
+                calculator.get_costs_by_region(start, end_exclusive),
+                calculator.get_costs_by_region(prev_start, prev_end),
+            )
+        if group_by == "sku":
+            return (
+                calculator.get_costs_by_sku(start, end_exclusive, region=region_filter),
+                calculator.get_costs_by_sku(prev_start, prev_end, region=region_filter),
+            )
+        if group_by == "top_resources":
+            # Fetch more than the display limit so we capture network, DB, etc.
+            raw_limit = max(limit * 5, 50)
+            return (
+                calculator.get_top_resource_costs_raw(start, end_exclusive, region=region_filter, limit=raw_limit),
+                calculator.get_top_resource_costs_raw(prev_start, prev_end, region=region_filter, limit=raw_limit),
             )
         return (
-            {},
-            {},
-            calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, region=region_filter),
-            calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, region=region_filter),
+            calculator.get_costs_by_service(start, end_exclusive, region=region_filter),
+            calculator.get_costs_by_service(prev_start, prev_end, region=region_filter),
         )
 
     try:
         loop = asyncio.get_event_loop()
-        cur_svc, prev_svc, current_rows, previous_rows = await asyncio.wait_for(
+        current, previous = await asyncio.wait_for(
             loop.run_in_executor(None, _fetch_breakdown), timeout=70.0
         )
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail="OCI Usage API timed out")
-    except Exception as exc:
+    except (asyncio.TimeoutError, Exception) as exc:
+        stale = get_cached(cache_key)
+        if stale is not None:
+            return CostsBreakdownResponse(**stale)
+        if isinstance(exc, asyncio.TimeoutError):
+            raise HTTPException(status_code=503, detail="OCI Usage API timed out")
         raise HTTPException(status_code=503, detail=f"OCI Usage API unavailable: {type(exc).__name__}")
 
-    if group_by == "service":
-        current, previous = cur_svc, prev_svc
-    else:
-        resource_ids = list({
-            *(r.get("resource_id") for r in current_rows if r.get("resource_id")),
-            *(r.get("resource_id") for r in previous_rows if r.get("resource_id")),
-        })
-        resources = db.query(Resource).filter(Resource.ocid.in_(resource_ids)).all() if resource_ids else []
-        resource_map = {r.ocid: r for r in resources}
-        rules = load_enabled_rules(db)
-        current = _aggregate_resource_rows(current_rows, group_by, resource_map, rules=rules, mapping_health=mapping_health)
-        previous = _aggregate_resource_rows(previous_rows, group_by, resource_map, rules=rules, mapping_health={"unowned_cost": 0.0, "low_confidence_cost": 0.0})
+    # For top_resources, resolve raw rows to {name: cost} using local DB names
+    if group_by == "top_resources":
+        cur_rows, prev_rows = current, previous
+        all_rids = list({r.get("resource_id") for r in cur_rows + prev_rows if r.get("resource_id")})
+        name_map = {}
+        if all_rids:
+            from core.models import Resource as _Res
+            db_rows = db.query(_Res.ocid, _Res.name, _Res.type, _Res.compartment_id).filter(_Res.ocid.in_(all_rids)).all()
+            comp_ids = {r.compartment_id for r in db_rows if r.compartment_id}
+            comp_names = {}
+            if comp_ids:
+                comp_names = dict(db.query(Compartment.id, Compartment.name).filter(Compartment.id.in_(comp_ids)).all())
+            for r in db_rows:
+                comp = comp_names.get(r.compartment_id, "")
+                label = r.name or r.ocid[-20:]
+                if comp:
+                    label = f"{label} ({comp})"
+                name_map[r.ocid] = label
+
+            # For unmatched OCIDs (e.g. mysqlinstance), try matching to parent DB systems
+            unmatched = [rid for rid in all_rids if rid not in name_map and rid.startswith("ocid1.")]
+            if unmatched:
+                # Build lookup: region -> list of mysql DB system names
+                mysql_resources = db.query(_Res.ocid, _Res.name, _Res.compartment_id).filter(_Res.type == "mysql").all()
+                mysql_by_region = {}
+                for mr in mysql_resources:
+                    parts = mr.ocid.split(".")
+                    if len(parts) >= 4:
+                        rgn = parts[3]
+                        mysql_by_region.setdefault(rgn, []).append(mr)
+
+                _ocid_type_labels = {
+                    "mysqlinstance": "MySQL",
+                    "mysqldbsystem": "MySQL DB",
+                    "opensearchcluster": "OpenSearch",
+                    "dbsystem": "Oracle DB",
+                    "autonomousdatabase": "Autonomous DB",
+                    "filesystem": "File System",
+                    "loadbalancer": "Load Balancer",
+                    "networkloadbalancer": "Network LB",
+                    "instance": "Compute",
+                    "bootvolume": "Boot Volume",
+                    "volume": "Block Volume",
+                    "bucket": "Object Storage",
+                }
+                _counter: dict[str, int] = {}
+                for rid in unmatched:
+                    parts = rid.split(".")
+                    ocid_type = parts[1] if len(parts) >= 2 else "unknown"
+                    ocid_region = parts[3] if len(parts) >= 4 else ""
+                    friendly = _ocid_type_labels.get(ocid_type, ocid_type.replace("_", " ").title())
+
+                    # Try matching mysqlinstance to a named mysql DB system in same region
+                    if ocid_type == "mysqlinstance" and ocid_region in mysql_by_region:
+                        candidates = mysql_by_region[ocid_region]
+                        idx = _counter.get(ocid_region + "_mysql", 0)
+                        if idx < len(candidates):
+                            mr = candidates[idx]
+                            comp = comp_names.get(mr.compartment_id, "")
+                            label = mr.name or friendly
+                            if comp:
+                                label = f"{label} ({comp})"
+                            name_map[rid] = label
+                            _counter[ocid_region + "_mysql"] = idx + 1
+                            continue
+
+                    region_label = ocid_region.replace("_", "-") if ocid_region else ""
+                    short_id = parts[-1][:8] if parts else rid[-8:]
+                    label = f"{friendly} {short_id}"
+                    if region_label:
+                        label = f"{label} ({region_label})"
+                    name_map[rid] = label
+
+        current = {}
+        for r in cur_rows:
+            rid = r.get("resource_id") or "Unknown"
+            label = name_map.get(rid, rid[-24:])
+            current[label] = current.get(label, 0.0) + float(r.get("total_cost") or 0)
+        previous = {}
+        for r in prev_rows:
+            rid = r.get("resource_id") or "Unknown"
+            label = name_map.get(rid, rid[-24:])
+            previous[label] = previous.get(label, 0.0) + float(r.get("total_cost") or 0)
 
     items = _build_breakdown_items(current, previous, limit=limit, min_share_pct=min_share_pct)
     response = CostsBreakdownResponse(
@@ -600,10 +702,7 @@ async def get_costs_breakdown(
                 previous=round(float(sum(previous.values())), 2),
             ),
             items=items,
-            mapping_health={
-                "unowned_cost": round(mapping_health["unowned_cost"], 2),
-                "low_confidence_cost": round(mapping_health["low_confidence_cost"], 2),
-            } if group_by in {"env", "team", "app"} else None,
+            mapping_health=None,
         ),
     )
     set_cached(cache_key, response.model_dump(), AGG_CACHE_TTL)
@@ -664,9 +763,12 @@ async def get_costs_movers(
         _cur_svc, _prev_svc, _cur_rows, _prev_rows = await asyncio.wait_for(
             loop.run_in_executor(None, _fetch_movers), timeout=70.0
         )
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail="OCI Usage API timed out")
-    except Exception as exc:
+    except (asyncio.TimeoutError, Exception) as exc:
+        stale = get_cached(cache_key)
+        if stale is not None:
+            return CostsMoversResponse(**stale)
+        if isinstance(exc, asyncio.TimeoutError):
+            raise HTTPException(status_code=503, detail="OCI Usage API timed out")
         raise HTTPException(status_code=503, detail=f"OCI Usage API unavailable: {type(exc).__name__}")
 
     items: list[MoversItemModel] = []
@@ -714,6 +816,20 @@ async def get_costs_movers(
                     )
                 )
         else:
+            # Resolve compartment names from DB
+            all_comp_ids = {r.compartment_id for r in resources if r.compartment_id}
+            comp_name_map = {}
+            if all_comp_ids:
+                comp_name_map = dict(db.query(Compartment.id, Compartment.name).filter(Compartment.id.in_(all_comp_ids)).all())
+
+            # Build a type label map for unmatched OCIDs
+            _type_labels = {
+                "mysqlinstance": "MySQL", "opensearchcluster": "OpenSearch",
+                "filesystem": "File System", "loadbalancer": "Load Balancer",
+                "bootvolume": "Boot Volume", "volume": "Block Volume",
+                "bucket": "Object Storage", "dbsystem": "Oracle DB",
+            }
+
             for row in current_rows:
                 rid = row.get("resource_id")
                 cur = float(row.get("total_cost") or 0.0)
@@ -722,8 +838,19 @@ async def get_costs_movers(
                 resource = resource_map.get(rid)
                 if resource and resource.name:
                     name = resource.name
+                    rtype = resource.type
+                    comp = comp_name_map.get(resource.compartment_id, "")
+                elif rid and rid.startswith("ocid1."):
+                    parts = rid.split(".")
+                    ocid_type = parts[1] if len(parts) >= 2 else "unknown"
+                    short_id = parts[-1][:8] if parts else rid[-8:]
+                    name = f"{_type_labels.get(ocid_type, ocid_type)} {short_id}"
+                    rtype = _type_labels.get(ocid_type, ocid_type)
+                    comp = parts[3].replace("_", "-") if len(parts) >= 4 else ""
                 else:
                     name = rid[-16:] if rid else "Unknown"
+                    rtype = None
+                    comp = ""
                 items.append(
                     MoversItemModel(
                         name=name,
@@ -731,8 +858,8 @@ async def get_costs_movers(
                         previous=round(prev, 2),
                         delta_abs=round(delta, 2),
                         delta_pct=round(_safe_pct(delta, prev), 2),
-                        type=resource.type if resource else None,
-                        compartment_name=row.get("compartment_name") or (resource.compartment_id if resource else None),
+                        type=rtype,
+                        compartment_name=comp or None,
                     )
                 )
 

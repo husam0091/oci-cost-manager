@@ -246,9 +246,9 @@ function Costs({ activeRegion }) {
                 {[
                   ['service', 'Service'],
                   ['compartment', 'Compartment'],
-                  ['team', 'Team'],
-                  ['app', 'App'],
-                  ['env', 'Env'],
+                  ['region', 'Region'],
+                  ['top_resources', 'Top Resources'],
+                  ['sku', 'SKU'],
                 ].map(([value, label]) => (
                   <button
                     key={value}
@@ -261,16 +261,6 @@ function Costs({ activeRegion }) {
                 ))}
               </div>
             </div>
-            {groupBy === 'team' || groupBy === 'app' || groupBy === 'env' ? (
-              <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-                <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
-                  Unowned cost: <span className="font-semibold text-slate-900">{currency(mappingHealth?.unowned_cost)}</span>
-                </div>
-                <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
-                  Low-confidence cost: <span className="font-semibold text-slate-900">{currency(mappingHealth?.low_confidence_cost)}</span>
-                </div>
-              </div>
-            ) : null}
             {empty || rows.length === 0 ? (
               <p className="text-sm text-slate-500">No data for selected range</p>
             ) : (
@@ -311,36 +301,42 @@ function Costs({ activeRegion }) {
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-3 text-sm font-medium text-slate-600">Top Movers (Services)</h3>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <h3 className="mb-3 text-sm font-medium text-slate-600 dark:text-slate-400">Top Movers (Services)</h3>
               {serviceMovers.length === 0 ? (
                 <p className="text-sm text-slate-500">No data for selected range</p>
               ) : (
                 <div className="space-y-2">
                   {serviceMovers.map((row) => (
-                    <div key={row.name} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                      <span className="text-slate-800">{row.name}</span>
-                      <DeltaChip deltaAbs={row.delta_abs} deltaPct={row.delta_pct} />
+                    <div key={row.name} className="rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-slate-800 dark:text-slate-200">{row.name}</span>
+                        <span className="text-slate-900 dark:text-slate-100">{currency(row.current)}</span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between">
+                        <span className="text-xs text-slate-500">prev {currency(row.previous)}</span>
+                        <DeltaChip deltaAbs={row.delta_abs} deltaPct={row.delta_pct} />
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-3 text-sm font-medium text-slate-600">Top Resources</h3>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <h3 className="mb-3 text-sm font-medium text-slate-600 dark:text-slate-400">Top Resources (by delta)</h3>
               {resourceMovers.length === 0 ? (
                 <p className="text-sm text-slate-500">No data for selected range</p>
               ) : (
                 <div className="space-y-2">
-                  {resourceMovers.map((row) => (
-                    <div key={`${row.name}-${row.compartment_name || '-'}`} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                  {resourceMovers.map((row, idx) => (
+                    <div key={`${row.name}-${idx}`} className="rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-slate-800">{row.name}</span>
-                        <span className="text-slate-700">{currency(row.current)}</span>
+                        <span className="truncate font-medium text-slate-800 dark:text-slate-200">{row.name}</span>
+                        <span className="whitespace-nowrap text-slate-900 dark:text-slate-100">{currency(row.current)}</span>
                       </div>
-                      <div className="mt-1 flex items-center justify-between text-xs text-slate-600">
-                        <span>{row.type || 'unknown'} - {row.compartment_name || 'Unknown compartment'}</span>
-                        <span>{Number(row.delta_pct || 0).toFixed(2)}%</span>
+                      <div className="mt-1 flex items-center justify-between">
+                        <span className="text-xs text-slate-500">{row.type || 'resource'}{row.compartment_name ? ` · ${row.compartment_name}` : ''}</span>
+                        <DeltaChip deltaAbs={row.delta_abs} deltaPct={row.delta_pct} />
                       </div>
                     </div>
                   ))}

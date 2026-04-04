@@ -1,5 +1,6 @@
 """Cost calculation service using OCI Usage API."""
 
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Optional, List, Dict, Any
@@ -9,9 +10,13 @@ import oci
 
 from .oci_client import get_oci_client
 
+# Global semaphore: serialize OCI Usage API calls
+# to avoid tripping OCI's per-tenancy rate limit.
+_oci_usage_semaphore = threading.Semaphore(1)
+
 # Simple in-memory cache
 _cache = {}
-_cache_ttl = 300  # 5 minutes
+_cache_ttl = 600  # 10 minutes
 
 
 def get_cached(key: str):
@@ -91,22 +96,29 @@ class CostCalculatorService:
                 dimensions=filter_dims,
             )
         
-        # Fetch usage data
+        # Fetch usage data with global concurrency throttle and exponential backoff
         response = None
         last_error = None
-        for attempt in range(2):
-            try:
-                response = usage_client.request_summarized_usages(request_details)
-                break
-            except oci.exceptions.RequestException as exc:
-                # Network/timeout errors — don't retry, fail fast so caller uses cache.
-                raise
-            except oci.exceptions.ServiceError as exc:
-                last_error = exc
-                is_429 = getattr(exc, "status", None) == 429
-                if not is_429 or attempt == 1:
+        max_retries = 4
+        _oci_usage_semaphore.acquire()
+        try:
+            for attempt in range(max_retries):
+                try:
+                    response = usage_client.request_summarized_usages(request_details)
+                    break
+                except oci.exceptions.RequestException as exc:
+                    # Network/timeout errors — don't retry, fail fast so caller uses cache.
                     raise
-                time.sleep(2.0)
+                except oci.exceptions.ServiceError as exc:
+                    last_error = exc
+                    is_429 = getattr(exc, "status", None) == 429
+                    is_transient = getattr(exc, "status", None) in (429, 500, 502, 503)
+                    if not is_transient or attempt == max_retries - 1:
+                        raise
+                    backoff = min(2 ** attempt + 1, 15)
+                    time.sleep(backoff)
+        finally:
+            _oci_usage_semaphore.release()
         if response is None and last_error:
             raise last_error
         
@@ -171,6 +183,81 @@ class CostCalculatorService:
 
         set_cached(cache_key, costs)
         return costs
+
+    def get_costs_by_compartment(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        region: Optional[str] = None,
+    ) -> Dict[str, float]:
+        """Get costs grouped by compartment name + region via OCI Usage API."""
+        region_key = region if (region and region != "all") else None
+        cache_key = f"costs_by_compartment_{start_date.date()}_{end_date.date()}_{region_key or 'all'}"
+        cached = get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        items = self.get_usage_summary(
+            start_date=start_date,
+            end_date=end_date,
+            group_by=["compartmentName", "region"],
+            region=region_key,
+        )
+
+        costs: Dict[str, float] = {}
+        for item in items:
+            name = item.get("compartment_name") or "Unknown"
+            rgn = item.get("region")
+            label = f"{name} ({rgn})" if rgn else name
+            costs[label] = costs.get(label, 0.0) + float(item.get("computed_amount") or 0)
+
+        set_cached(cache_key, costs)
+        return costs
+
+    def get_costs_by_sku(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        region: Optional[str] = None,
+    ) -> Dict[str, float]:
+        """Get costs grouped by SKU/product name."""
+        region_key = region if (region and region != "all") else None
+        cache_key = f"costs_by_sku_{start_date.date()}_{end_date.date()}_{region_key or 'all'}"
+        cached = get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        items = self.get_usage_summary(
+            start_date=start_date,
+            end_date=end_date,
+            group_by=["skuName"],
+            region=region_key,
+        )
+
+        costs: Dict[str, float] = {}
+        for item in items:
+            name = item.get("sku_name") or "Unknown"
+            costs[name] = costs.get(name, 0.0) + float(item.get("computed_amount") or 0)
+
+        set_cached(cache_key, costs)
+        return costs
+
+    def get_top_resource_costs_raw(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        region: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Get top N most expensive resources as raw rows (caller resolves names)."""
+        rows = self.get_costs_by_resource(
+            start_date=start_date,
+            end_date=end_date,
+            include_skus=False,
+            region=region,
+        )
+        rows.sort(key=lambda x: x.get("total_cost", 0), reverse=True)
+        return rows[:limit]
 
     def get_costs_by_resource(
         self,
