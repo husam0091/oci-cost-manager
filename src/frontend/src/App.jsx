@@ -14,6 +14,8 @@ import {
   Wrench,
   Sparkles,
   ScrollText,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Resources from './pages/Resources';
@@ -144,6 +146,7 @@ function AppLayout() {
   const [toasts, setToasts] = useState([]);
   const [activeRegion, setActiveRegion] = useState(localStorage.getItem('ui_active_region') || 'all');
   const [availableRegions, setAvailableRegions] = useState([]);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('ui_dark_mode') === 'true');
 
   useEffect(() => {
     let mounted = true;
@@ -179,6 +182,16 @@ function AppLayout() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    localStorage.setItem('ui_dark_mode', String(darkMode));
+  }, [darkMode]);
 
   useEffect(() => {
     const onApiError = (evt) => {
@@ -218,33 +231,33 @@ function AppLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-app-gradient text-slate-900">
+    <div className="min-h-screen bg-app-gradient text-slate-900 dark:text-slate-100">
       <div className="mx-auto flex min-h-screen max-w-[1800px]">
         <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} profileName={profileName} persona={persona} />
         <main className="w-full flex-1">
           <div className="fixed right-4 top-4 z-50 space-y-2">
             {toasts.map((t) => (
-              <div key={t.id} className="max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 shadow">
+              <div key={t.id} className="max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 shadow dark:border-rose-700 dark:bg-rose-950 dark:text-rose-200">
                 <div className="font-medium">{t.code || 'API_ERROR'}</div>
                 <div>{t.message || 'Request failed'}</div>
-                {t.correlation_id ? <div className="mt-1 text-xs text-rose-700">Correlation: {t.correlation_id}</div> : null}
+                {t.correlation_id ? <div className="mt-1 text-xs text-rose-700 dark:text-rose-400">Correlation: {t.correlation_id}</div> : null}
               </div>
             ))}
           </div>
-          <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 px-4 py-3 backdrop-blur lg:px-8">
+          <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-slate-700/70 dark:bg-slate-900/92 lg:px-8">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  className="rounded-md border border-slate-300 bg-white p-2 text-slate-700 hover:bg-slate-100 lg:hidden"
+                  className="rounded-md border border-slate-300 bg-white p-2 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 lg:hidden"
                   onClick={() => setMobileOpen(true)}
                   aria-label="Open navigation"
                 >
                   <Menu size={18} />
                 </button>
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">Workspace</p>
-                  <h2 className="text-lg font-semibold tracking-tight text-slate-900">{pageTitle}</h2>
+                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Workspace</p>
+                  <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{pageTitle}</h2>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -255,7 +268,7 @@ function AppLayout() {
                       setActiveRegion(e.target.value);
                       localStorage.setItem('ui_active_region', e.target.value);
                     }}
-                    className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs font-medium text-sky-700"
+                    className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs font-medium text-sky-700 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-300"
                   >
                     <option value="all">All Regions</option>
                     {availableRegions.map((r) => (
@@ -269,25 +282,35 @@ function AppLayout() {
                     setPersona(e.target.value);
                     localStorage.setItem('ui_persona', e.target.value);
                   }}
-                  className="hidden rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 sm:block"
+                  className="hidden rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 sm:block"
                 >
                   <option>Executive</option>
                   <option>FinOps</option>
                   <option>Engineer</option>
                 </select>
-                <div className="hidden rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-medium text-cyan-700 sm:block">
+                <div className="hidden rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-medium text-cyan-700 dark:border-cyan-700 dark:bg-cyan-950 dark:text-cyan-300 sm:block">
                   Role: {role}
                 </div>
                 {demoMode ? (
-                  <div className="hidden rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 sm:block">
+                  <div className="hidden rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300 sm:block">
                     Demo mode: read-only
                   </div>
                 ) : null}
+                {/* Dark / Light mode toggle */}
+                <button
+                  type="button"
+                  onClick={() => setDarkMode((v) => !v)}
+                  title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                  className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                  aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                >
+                  {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+                </button>
               </div>
             </div>
           </header>
 
-          <section className="p-4 lg:p-8">
+          <section className="p-4 dark:bg-slate-950/50 lg:p-8">
             <GlobalStatusBar />
             <Routes>
               <Route path="/" element={<Dashboard persona={persona} activeRegion={activeRegion} />} />
@@ -313,7 +336,7 @@ function AppLayout() {
               />
             </Routes>
           </section>
-          <footer className="border-t border-slate-200/70 bg-white/70 px-4 py-2 text-right text-xs text-slate-600 lg:px-8">
+          <footer className="border-t border-slate-200/70 bg-white/70 px-4 py-2 text-right text-xs text-slate-600 dark:border-slate-700/70 dark:bg-slate-900/70 dark:text-slate-400 lg:px-8">
             OCI Cost Manager v{appVersion}
           </footer>
         </main>

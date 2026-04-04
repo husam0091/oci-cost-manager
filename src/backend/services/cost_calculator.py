@@ -42,26 +42,28 @@ class CostCalculatorService:
         granularity: str = "MONTHLY",
         group_by: Optional[List[str]] = None,
         compartment_id: Optional[str] = None,
+        region: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get usage summary from OCI Usage API.
-        
+
         Args:
             start_date: Start of the reporting period.
             end_date: End of the reporting period.
             granularity: DAILY or MONTHLY.
             group_by: List of dimensions to group by (e.g., ["service", "skuName"]).
             compartment_id: Optional compartment filter.
-            
+            region: Optional region filter (OCI region identifier, e.g. 'me-jeddah-1').
+
         Returns:
             List of usage summary items.
         """
         usage_client = self.oci_client.usage_client
         tenancy_id = self.oci_client.tenancy_id
-        
+
         # OCI Usage API requires dates with zero time precision
         start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
         end_date = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
         # Build request
         request_details = oci.usage_api.models.RequestSummarizedUsagesDetails(
             tenant_id=tenancy_id,
@@ -72,15 +74,21 @@ class CostCalculatorService:
             group_by=group_by or ["service", "skuName"],
             compartment_depth=6,
         )
-        
+
+        # Build dimension filters (region and/or compartment)
+        filter_dims = []
         if compartment_id:
+            filter_dims.append(
+                oci.usage_api.models.Dimension(key="compartmentId", value=compartment_id)
+            )
+        if region and region != "all":
+            filter_dims.append(
+                oci.usage_api.models.Dimension(key="region", value=region)
+            )
+        if filter_dims:
             request_details.filter = oci.usage_api.models.Filter(
-                dimensions=[
-                    oci.usage_api.models.Dimension(
-                        key="compartmentId",
-                        value=compartment_id
-                    )
-                ]
+                operator="AND",
+                dimensions=filter_dims,
             )
         
         # Fetch usage data
@@ -124,6 +132,7 @@ class CostCalculatorService:
                 "compartment_id": getattr(item, "compartment_id", None),
                 "compartment_name": getattr(item, "compartment_name", None),
                 "resource_id": getattr(item, "resource_id", None),
+                "region": getattr(item, "region", None),
             })
         
         return items
@@ -133,33 +142,15 @@ class CostCalculatorService:
         start_date: datetime,
         end_date: datetime,
         services: Optional[List[str]] = None,
-        allowed_resource_ids: Optional[set] = None,
+        region: Optional[str] = None,
     ) -> Dict[str, float]:
         """Get costs grouped by service.
 
-        When allowed_resource_ids is provided the result is filtered to only
-        include line-items belonging to those resource OCIDs (region filter).
+        When region is provided, the OCI Usage API filters to that region
+        server-side via a dimension filter (no separate resource lookup needed).
         """
-        if allowed_resource_ids is not None:
-            # Must fetch with resourceId dimension so we can filter per resource.
-            items = self.get_usage_summary(
-                start_date=start_date,
-                end_date=end_date,
-                group_by=["service", "resourceId"],
-            )
-            costs: Dict[str, float] = {}
-            for item in items:
-                rid = item.get("resource_id") or ""
-                if rid and rid not in allowed_resource_ids:
-                    continue
-                service = item.get("service") or "Unknown"
-                if services and service not in services:
-                    continue
-                costs[service] = costs.get(service, 0.0) + float(item.get("computed_amount") or 0)
-            return costs
-
-        # Unfiltered fast path (cacheable).
-        cache_key = f"costs_by_service_{start_date.date()}_{end_date.date()}"
+        region_key = region if (region and region != "all") else None
+        cache_key = f"costs_by_service_{start_date.date()}_{end_date.date()}_{region_key or 'all'}"
         cached = get_cached(cache_key)
         if cached is not None:
             return cached
@@ -168,14 +159,15 @@ class CostCalculatorService:
             start_date=start_date,
             end_date=end_date,
             group_by=["service"],
+            region=region_key,
         )
 
-        costs = {}
+        costs: Dict[str, float] = {}
         for item in items:
-            service = item.get("service", "Unknown")
+            service = item.get("service") or "Unknown"
             if services and service not in services:
                 continue
-            costs[service] = costs.get(service, 0) + item.get("computed_amount", 0)
+            costs[service] = costs.get(service, 0.0) + float(item.get("computed_amount") or 0)
 
         set_cached(cache_key, costs)
         return costs
@@ -186,35 +178,36 @@ class CostCalculatorService:
         end_date: datetime,
         compartment_id: Optional[str] = None,
         include_skus: bool = True,
-        allowed_resource_ids: Optional[set] = None,
+        region: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get costs grouped by resource.
 
-        When allowed_resource_ids is provided only those resource OCIDs are
-        returned (region filter).
+        When region is provided the OCI Usage API applies the region dimension
+        filter server-side.
         """
+        region_key = region if (region and region != "all") else None
         group_by = ["resourceId", "skuName"] if include_skus else ["resourceId"]
         items = self.get_usage_summary(
             start_date=start_date,
             end_date=end_date,
             group_by=group_by,
             compartment_id=compartment_id,
+            region=region_key,
         )
 
         # Aggregate by resource
-        resource_costs = {}
+        resource_costs: Dict[str, Any] = {}
         for item in items:
-            resource_id = item.get("resource_id", "Unknown")
+            resource_id = item.get("resource_id") or "Unknown"
             if resource_id not in resource_costs:
                 resource_costs[resource_id] = {
                     "resource_id": resource_id,
                     "compartment_id": item.get("compartment_id"),
                     "compartment_name": item.get("compartment_name"),
-                    "total_cost": 0,
+                    "total_cost": 0.0,
                     "skus": [],
                 }
-
-            resource_costs[resource_id]["total_cost"] += item.get("computed_amount", 0)
+            resource_costs[resource_id]["total_cost"] += float(item.get("computed_amount") or 0)
             if include_skus:
                 resource_costs[resource_id]["skus"].append({
                     "sku_name": item.get("sku_name"),
@@ -224,10 +217,7 @@ class CostCalculatorService:
                     "cost": item.get("computed_amount"),
                 })
 
-        result = list(resource_costs.values())
-        if allowed_resource_ids is not None:
-            result = [r for r in result if r.get("resource_id") in allowed_resource_ids]
-        return result
+        return list(resource_costs.values())
     
     def get_database_costs(
         self,
@@ -306,40 +296,15 @@ class CostCalculatorService:
         self,
         start_date: datetime,
         end_date: datetime,
-        allowed_resource_ids: Optional[set] = None,
+        region: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get costs broken down by day and service.
 
-        When allowed_resource_ids is provided, only those resources are summed
-        (region filter).
+        When region is provided the OCI Usage API applies the region dimension
+        filter server-side.
         """
-        if allowed_resource_ids is not None:
-            items = self.get_usage_summary(
-                start_date=start_date,
-                end_date=end_date,
-                granularity="DAILY",
-                group_by=["service", "resourceId"],
-            )
-            by_date: Dict[str, Dict] = {}
-            for item in items:
-                rid = item.get("resource_id") or ""
-                if rid and rid not in allowed_resource_ids:
-                    continue
-                date_key = (item.get("time_usage_started") or "")[:10]
-                if not date_key:
-                    continue
-                service = item.get("service") or "Other"
-                cost = float(item.get("computed_amount") or 0)
-                if date_key not in by_date:
-                    by_date[date_key] = {"date": date_key, "total": 0.0, "by_service": {}}
-                by_date[date_key]["total"] = round(by_date[date_key]["total"] + cost, 4)
-                by_date[date_key]["by_service"][service] = round(
-                    by_date[date_key]["by_service"].get(service, 0.0) + cost, 4
-                )
-            return [v for _, v in sorted(by_date.items())]
-
-        # Unfiltered fast path (cacheable).
-        cache_key = f"daily_costs_{start_date.date()}_{end_date.date()}"
+        region_key = region if (region and region != "all") else None
+        cache_key = f"daily_costs_{start_date.date()}_{end_date.date()}_{region_key or 'all'}"
         cached = get_cached(cache_key)
         if cached is not None:
             return cached
@@ -349,29 +314,59 @@ class CostCalculatorService:
             end_date=end_date,
             granularity="DAILY",
             group_by=["service"],
+            region=region_key,
         )
 
-        by_date_un: Dict[str, Dict] = {}
+        by_date: Dict[str, Dict] = {}
         for item in items:
             date_key = (item.get("time_usage_started") or "")[:10]
             if not date_key:
                 continue
             service = item.get("service") or "Other"
             cost = float(item.get("computed_amount") or 0)
-            if date_key not in by_date_un:
-                by_date_un[date_key] = {"date": date_key, "total": 0.0, "by_service": {}}
-            by_date_un[date_key]["total"] = round(by_date_un[date_key]["total"] + cost, 4)
-            by_date_un[date_key]["by_service"][service] = round(
-                by_date_un[date_key]["by_service"].get(service, 0.0) + cost, 4
+            if date_key not in by_date:
+                by_date[date_key] = {"date": date_key, "total": 0.0, "by_service": {}}
+            by_date[date_key]["total"] = round(by_date[date_key]["total"] + cost, 4)
+            by_date[date_key]["by_service"][service] = round(
+                by_date[date_key]["by_service"].get(service, 0.0) + cost, 4
             )
 
-        result = [v for _, v in sorted(by_date_un.items())]
+        result = [v for _, v in sorted(by_date.items())]
         set_cached(cache_key, result)
         return result
+
+    def get_costs_by_region(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> Dict[str, float]:
+        """Get costs aggregated by OCI region (tenancy-wide).
+
+        Returns a dict of {region_name: total_cost}.
+        """
+        cache_key = f"costs_by_region_{start_date.date()}_{end_date.date()}"
+        cached = get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        items = self.get_usage_summary(
+            start_date=start_date,
+            end_date=end_date,
+            group_by=["region"],
+        )
+
+        costs: Dict[str, float] = {}
+        for item in items:
+            reg = item.get("region") or "Unknown"
+            costs[reg] = costs.get(reg, 0.0) + float(item.get("computed_amount") or 0)
+
+        set_cached(cache_key, costs)
+        return costs
 
     def get_cost_trends(
         self,
         months: int = 6,
+        region: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get monthly cost trends.
         
@@ -396,6 +391,7 @@ class CostCalculatorService:
             costs = self.get_costs_by_service(
                 start_date=month_start,
                 end_date=month_end,
+                region=region,
             )
             
             trends.append({

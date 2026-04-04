@@ -486,6 +486,12 @@ export const getDailyCosts = (params = {}) => {
   return api.get('/costs/daily', { params: { ...params, ...(region ? { region } : { region: undefined }) } });
 };
 
+// Cross-region spend breakdown
+export const getCostsByRegion = (params = {}) => {
+  const { start_date, end_date } = resolveDateRange(params);
+  return api.get('/costs/by-region', { params: { start_date, end_date } });
+};
+
 // Universal Credits subscriptions
 export const getSubscriptions = () => api.get('/subscriptions');
 

@@ -299,7 +299,10 @@ class CostByResource(Base):
     resource_name = Column(String(255), nullable=True)
     service = Column(String(128), nullable=True)
     compartment_ocid = Column(String(255), nullable=True, index=True)
+    region = Column(String(64), nullable=True, index=True)
     cost = Column(Numeric(18, 6), nullable=False, default=0)
+    period_start = Column(Date, nullable=True)
+    period_end = Column(Date, nullable=True)
     __table_args__ = (
         Index("idx_cost_by_resource_resource_ocid", "resource_ocid"),
         Index("idx_cost_by_resource_date_resource", "date", "resource_ocid"),

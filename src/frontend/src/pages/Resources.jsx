@@ -148,7 +148,7 @@ function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
   const isHealthy = ['AVAILABLE', 'RUNNING', 'ACTIVE'].includes(resource.status);
 
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+    <div className="rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700 dark:bg-slate-800">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3 min-w-0">
@@ -169,7 +169,7 @@ function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
 
       {/* Monthly cost — prominent row */}
       {monthlyCost != null && (
-        <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2">
+        <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-700/50">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500">Est. Monthly Cost</span>
             <span className="text-sm font-bold text-slate-800">${monthlyCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
@@ -327,10 +327,10 @@ function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
         const conf = resource.allocation_confidence;
         if (!env && !team && !app) return null;
         return (
-          <div className="mt-3 flex flex-wrap gap-1 border-t border-slate-100 pt-2">
-            {env && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">env: {env}</span>}
-            {team && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">team: {team}</span>}
-            {app && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">app: {app}</span>}
+          <div className="mt-3 flex flex-wrap gap-1 border-t border-slate-100 pt-2 dark:border-slate-700">
+            {env && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 dark:bg-slate-700 dark:text-slate-400">env: {env}</span>}
+            {team && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 dark:bg-slate-700 dark:text-slate-400">team: {team}</span>}
+            {app && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500 dark:bg-slate-700 dark:text-slate-400">app: {app}</span>}
             {conf && conf !== 'low' && (
               <span className={`rounded px-1.5 py-0.5 text-[11px] ${conf === 'high' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
                 {conf} confidence
@@ -550,7 +550,7 @@ function Resources({ activeRegion = 'all' }) {
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
           >
             <option value="daily">Daily</option>
             <option value="monthly">Monthly</option>
@@ -569,7 +569,7 @@ function Resources({ activeRegion = 'all' }) {
       </div>
 
       {/* Filters */}
-      <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur">
+      <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-white/80 p-4 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-800/80">
         {/* Search box */}
         <div className="relative">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -577,7 +577,7 @@ function Resources({ activeRegion = 'all' }) {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by name or IP address…"
-            className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-4 text-sm shadow-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+            className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-4 text-sm shadow-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200 dark:placeholder-slate-400"
           />
           {searchInput && (
             <button onClick={() => { setSearchInput(''); setSearchQuery(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs">✕</button>
@@ -592,7 +592,7 @@ function Resources({ activeRegion = 'all' }) {
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 filter === f.key
                   ? 'bg-sky-600 text-white'
-                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'
               }`}
             >
               {f.label} ({counts[f.key] ?? 0})
@@ -605,7 +605,7 @@ function Resources({ activeRegion = 'all' }) {
           <select
             value={compartmentId}
             onChange={e => setCompartmentId(e.target.value)}
-            className="min-w-[220px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+            className="min-w-[220px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
           >
             <option value="">All compartments</option>
             {compartments.map(c => (
@@ -634,7 +634,7 @@ function Resources({ activeRegion = 'all' }) {
           </div>
         </>
       ) : searchQuery ? (
-        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-12 text-center shadow-sm">
+        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-12 text-center shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <Search size={48} className="mx-auto mb-4 text-slate-300" />
           <p className="text-slate-500">No resources match "<span className="font-medium">{searchQuery}</span>"</p>
           <button onClick={() => { setSearchInput(''); setSearchQuery(''); }} className="mt-3 text-sm text-sky-600 hover:underline">Clear search</button>
@@ -655,7 +655,7 @@ function Resources({ activeRegion = 'all' }) {
           </button>
         </div>
       ) : (
-        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-12 text-center shadow-sm">
+        <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-12 text-center shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <Database size={48} className="mx-auto mb-4 text-slate-300" />
           <p className="text-slate-500">{UI_COPY.empty.noCostData}</p>
           <p className="mt-1 text-sm text-slate-400">{UI_COPY.detection.lowConfidence}</p>

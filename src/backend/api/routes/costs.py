@@ -320,7 +320,7 @@ async def get_costs_by_resource(
     cache_key = f"costs_by_resource_{compartment_id or 'all'}_{start_date or 'auto'}_{end_date or 'auto'}_{'skus' if include_skus else 'noskus'}_{region or 'all'}"
     try:
         calculator = get_cost_calculator()
-        allowed_ids = _get_allowed_resource_ids(db, region)
+        region_filter = region if (region and region != "all") else None
 
         # Parse dates. End date is treated inclusively for date-only inputs.
         start = _parse_cost_date(start_date, is_end=False)
@@ -333,7 +333,7 @@ async def get_costs_by_resource(
             end,
             compartment_id,
             include_skus=include_skus,
-            allowed_resource_ids=allowed_ids,
+            region=region_filter,
         )
 
         # Normalize workload categories in backend so frontend does not duplicate SKU mapping.
@@ -425,7 +425,7 @@ async def get_costs_summary(
     end = _parse_cost_date(end_date, is_end=True)
     if end <= start:
         raise HTTPException(status_code=422, detail="end_date must be after start_date")
-    allowed_ids = _get_allowed_resource_ids(db, region)
+    region_filter = region if (region and region != "all") else None
     cache_key = _cache_key(
         "agg_summary",
         start=iso_date(start),
@@ -441,15 +441,15 @@ async def get_costs_summary(
 
     def _fetch_summary():
         return (
-            calculator.get_costs_by_service(start, end, allowed_resource_ids=allowed_ids),
-            calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids),
-            calculator.get_costs_by_resource(start, end, include_skus=False, allowed_resource_ids=allowed_ids),
+            calculator.get_costs_by_service(start, end, region=region_filter),
+            calculator.get_costs_by_service(prev_start, prev_end, region=region_filter),
+            calculator.get_costs_by_resource(start, end, include_skus=False, region=region_filter),
         )
 
     try:
         loop = asyncio.get_event_loop()
         current_by_service, previous_by_service, resource_rows = await asyncio.wait_for(
-            loop.run_in_executor(None, _fetch_summary), timeout=20.0
+            loop.run_in_executor(None, _fetch_summary), timeout=70.0
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail="OCI Usage API timed out")
@@ -540,7 +540,7 @@ async def get_costs_breakdown(
     if compare != "previous":
         raise HTTPException(status_code=422, detail="compare must be 'previous'")
 
-    allowed_ids = _get_allowed_resource_ids(db, region)
+    region_filter = region if (region and region != "all") else None
     calculator = get_cost_calculator()
     start, end_exclusive, days = parse_required_range(start_date, end_date)
     prev_start, prev_end = compute_previous_period(start, end_exclusive)
@@ -550,22 +550,22 @@ async def get_costs_breakdown(
     def _fetch_breakdown():
         if group_by == "service":
             return (
-                calculator.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids),
-                calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids),
+                calculator.get_costs_by_service(start, end_exclusive, region=region_filter),
+                calculator.get_costs_by_service(prev_start, prev_end, region=region_filter),
                 [],
                 [],
             )
         return (
             {},
             {},
-            calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, allowed_resource_ids=allowed_ids),
-            calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, allowed_resource_ids=allowed_ids),
+            calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, region=region_filter),
+            calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, region=region_filter),
         )
 
     try:
         loop = asyncio.get_event_loop()
         cur_svc, prev_svc, current_rows, previous_rows = await asyncio.wait_for(
-            loop.run_in_executor(None, _fetch_breakdown), timeout=20.0
+            loop.run_in_executor(None, _fetch_breakdown), timeout=70.0
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail="OCI Usage API timed out")
@@ -639,7 +639,7 @@ async def get_costs_movers(
     if compare != "previous":
         raise HTTPException(status_code=422, detail="compare must be 'previous'")
 
-    allowed_ids = _get_allowed_resource_ids(db, region)
+    region_filter = region if (region and region != "all") else None
     calculator = get_cost_calculator()
     start, end_exclusive, days = parse_required_range(start_date, end_date)
     prev_start, prev_end = compute_previous_period(start, end_exclusive)
@@ -647,22 +647,22 @@ async def get_costs_movers(
     def _fetch_movers():
         if group_by == "service":
             return (
-                calculator.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids),
-                calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids),
+                calculator.get_costs_by_service(start, end_exclusive, region=region_filter),
+                calculator.get_costs_by_service(prev_start, prev_end, region=region_filter),
                 [],
                 [],
             )
         return (
             {},
             {},
-            calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, allowed_resource_ids=allowed_ids),
-            calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, allowed_resource_ids=allowed_ids),
+            calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, region=region_filter),
+            calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, region=region_filter),
         )
 
     try:
         loop = asyncio.get_event_loop()
         _cur_svc, _prev_svc, _cur_rows, _prev_rows = await asyncio.wait_for(
-            loop.run_in_executor(None, _fetch_movers), timeout=20.0
+            loop.run_in_executor(None, _fetch_movers), timeout=70.0
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail="OCI Usage API timed out")
@@ -833,7 +833,7 @@ async def get_daily_costs(
     end = _parse_cost_date(end_date, is_end=True) if end_date else today
     if end <= start:
         raise HTTPException(status_code=422, detail="end_date must be after start_date")
-    allowed_ids = _get_allowed_resource_ids(db, region)
+    region_filter = region if (region and region != "all") else None
     cache_key = _cache_key("daily_costs", start=iso_date(start), end=iso_date(end), region=region or "")
     cached = get_cached(cache_key)
     if cached is not None:
@@ -842,8 +842,8 @@ async def get_daily_costs(
         calculator = get_cost_calculator()
         loop = asyncio.get_event_loop()
         daily = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: calculator.get_daily_costs(start, end, allowed_resource_ids=allowed_ids)),
-            timeout=20.0,
+            loop.run_in_executor(None, lambda: calculator.get_daily_costs(start, end, region=region_filter)),
+            timeout=70.0,
         )
         mtd_total = round(sum(d["total"] for d in daily), 2)
         result = {
@@ -862,6 +862,45 @@ async def get_daily_costs(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/by-region")
+async def get_costs_by_region(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+):
+    """Get total spend broken down by OCI region for cross-region comparison."""
+    start = _parse_cost_date(start_date, is_end=False)
+    end = _parse_cost_date(end_date, is_end=True)
+    if end <= start:
+        raise HTTPException(status_code=422, detail="end_date must be after start_date")
+    cache_key = _cache_key("costs_by_region", start=iso_date(start), end=iso_date(end))
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return {"success": True, "data": cached, "cached": True}
+    try:
+        calculator = get_cost_calculator()
+        loop = asyncio.get_event_loop()
+        by_region = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: calculator.get_costs_by_region(start, end)),
+            timeout=70.0,
+        )
+        total = sum(by_region.values())
+        regions = sorted(
+            [{"region": r, "total": round(v, 2), "share_pct": round(v / total * 100, 2) if total else 0}
+             for r, v in by_region.items()],
+            key=lambda x: -x["total"],
+        )
+        result = {"total": round(total, 2), "regions": regions, "period": {"start_date": iso_date(start), "end_date": iso_date(end)}}
+        set_cached(cache_key, result, AGG_CACHE_TTL)
+        return {"success": True, "data": result, "cached": False}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail="OCI Usage API timed out")
+    except Exception as exc:
+        cached = get_cached(cache_key)
+        if cached is not None:
+            return {"success": True, "data": cached, "cached": True, "warning": str(exc)}
+        raise HTTPException(status_code=503, detail=f"OCI Usage API unavailable: {type(exc).__name__}")
+
+
 @router.get("/trends")
 async def get_cost_trends(
     months: int = Query(6, description="Number of months to include"),
@@ -870,7 +909,7 @@ async def get_cost_trends(
     try:
         calculator = get_cost_calculator()
         trends = calculator.get_cost_trends(months)
-        
+
         return {
             "success": True,
             "data": trends,

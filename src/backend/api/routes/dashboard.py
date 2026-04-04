@@ -159,7 +159,7 @@ async def dashboard_summary(
     end_exclusive = parse_iso_datetime(end_date, is_end=True, required=True)
     normalized_start = iso_date(start)
     normalized_end = iso_date(end_exclusive - timedelta(days=1))
-    allowed_ids = _get_allowed_resource_ids(db, region)
+    region_filter = region if (region and region != "all") else None
     cached = get_cached(_cache_key(normalized_start, normalized_end, compare, region=region))
     if cached is not None:
         return DashboardSummaryResponse(**cached)
@@ -173,17 +173,17 @@ async def dashboard_summary(
 
     def _fetch_all():
         return (
-            calc.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids),
-            calc.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids),
-            calc.get_costs_by_resource(start, end_exclusive, include_skus=True, allowed_resource_ids=allowed_ids),
-            calc.get_costs_by_resource(prev_start, prev_end, allowed_resource_ids=allowed_ids),
+            calc.get_costs_by_service(start, end_exclusive, region=region_filter),
+            calc.get_costs_by_service(prev_start, prev_end, region=region_filter),
+            calc.get_costs_by_resource(start, end_exclusive, include_skus=True, region=region_filter),
+            calc.get_costs_by_resource(prev_start, prev_end, region=region_filter),
         )
 
     try:
         loop = asyncio.get_event_loop()
         current_by_service, previous_by_service, current_resources, previous_resources = await asyncio.wait_for(
             loop.run_in_executor(None, _fetch_all),
-            timeout=20.0,
+            timeout=70.0,
         )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail="OCI Usage API timed out — please retry shortly")

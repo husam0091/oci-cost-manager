@@ -485,7 +485,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
   if (!isLoggedIn) {
     return (
       <div className="mx-auto mt-8 max-w-md">
-        <div className="rounded-3xl border border-white/50 bg-white/85 p-8 shadow-xl">
+        <div className="rounded-3xl border border-white/50 bg-white/85 p-8 shadow-xl dark:border-slate-700 dark:bg-slate-800">
           <div className="mb-6 flex items-center gap-3">
             <div className="rounded-xl bg-cyan-100 p-3"><LogIn className="text-cyan-700" size={24} /></div>
             <div><h1 className="text-xl font-bold text-slate-900">Admin Login</h1></div>
@@ -503,23 +503,23 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
     );
   }
 
-  const tabClass = (id) => `rounded-lg px-3 py-2 text-sm font-medium ${activeTab === id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:bg-white/60'}`;
+  const tabClass = (id) => `rounded-lg px-3 py-2 text-sm font-medium ${activeTab === id ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:bg-white/60 dark:text-slate-400 dark:hover:bg-slate-700'}`;
 
   return (
     <div className="space-y-6">
-      <div className="rounded-3xl border border-white/60 bg-white/85 p-6 shadow-xl">
+      <div className="rounded-3xl border border-white/60 bg-white/85 p-6 shadow-xl dark:border-slate-700 dark:bg-slate-800">
         <div className="flex flex-col items-start justify-between gap-3 md:flex-row md:items-center">
           <div><h1 className="text-2xl font-bold tracking-tight text-slate-900">Settings</h1></div>
           {!forceLogin && (
-            <button onClick={handleLogout} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-slate-700">
+            <button onClick={handleLogout} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-slate-700 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300">
               <LogOut size={16} /> Logout
             </button>
           )}
         </div>
       </div>
 
-      <div className="rounded-2xl border border-white/60 bg-white/90 p-2 shadow-lg">
-        <div className="grid grid-cols-3 gap-2 rounded-xl bg-slate-100 p-1">
+      <div className="rounded-2xl border border-white/60 bg-white/90 p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+        <div className="grid grid-cols-3 gap-2 rounded-xl bg-slate-100 p-1 dark:bg-slate-900">
           <button className={tabClass('integration')} onClick={() => setActiveTab('integration')}>Integration</button>
           <button className={tabClass('operations')} onClick={() => setActiveTab('operations')}>Operations</button>
           <button className={tabClass('users')} onClick={() => setActiveTab('users')}>Users</button>
@@ -559,7 +559,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
                 <button onClick={handleUploadKey} disabled={!selectedKeyFile || uploadingKey} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white">
                   {uploadingKey ? 'Uploading...' : 'Upload / Replace OCI Key'}
                 </button>
-                <button type="button" onClick={() => setShowAdvancedPem((v) => !v)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700">
+                <button type="button" onClick={() => setShowAdvancedPem((v) => !v)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300">
                   {showAdvancedPem ? 'Hide Advanced' : 'Show Advanced'}
                 </button>
               </div>
@@ -586,7 +586,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
                 </div>
               )}
               {enabledRegions.map((r) => (
-                <div key={r} className="mb-1.5 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                <div key={r} className="mb-1.5 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700">
                   <span className="font-mono text-slate-700">{r}</span>
                   <button
                     onClick={async () => {
@@ -778,9 +778,9 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
               />
               Include child compartments
             </label>
-            <div className="max-h-56 space-y-1 overflow-auto rounded-lg border border-slate-200 p-2">
+            <div className="max-h-56 space-y-1 overflow-auto rounded-lg border border-slate-200 p-2 dark:border-slate-600 dark:bg-slate-800/50">
               {availableCompartments.map((c) => (
-                <label key={c.id} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-slate-50">
+                <label key={c.id} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-slate-50 dark:hover:bg-slate-700">
                   <input
                     type="checkbox"
                     checked={importantCompartments.includes(c.id)}
@@ -807,7 +807,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
               <button onClick={handleRunScan} disabled={scanRunning || ociTestStatus?.type !== 'success'} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white">
                 {scanRunning ? 'Scanning...' : 'Run Scan'}
               </button>
-              <button onClick={loadScanRuns} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700">
+              <button onClick={loadScanRuns} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300">
                 <RefreshCw size={14} /> Refresh History
               </button>
             </div>
@@ -854,7 +854,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
               </select>
             </div>
             <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="rounded-lg border border-slate-200 p-3">
+              <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-600 dark:bg-slate-800/50">
                 <p className="mb-2 text-sm font-medium text-slate-800">Allowed Teams</p>
                 <div className="max-h-32 space-y-1 overflow-auto">
                   {permissionOptions.teams.map((x) => (
@@ -862,7 +862,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
                   ))}
                 </div>
               </div>
-              <div className="rounded-lg border border-slate-200 p-3">
+              <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-600 dark:bg-slate-800/50">
                 <p className="mb-2 text-sm font-medium text-slate-800">Allowed Apps</p>
                 <div className="max-h-32 space-y-1 overflow-auto">
                   {permissionOptions.apps.map((x) => (
@@ -870,7 +870,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
                   ))}
                 </div>
               </div>
-              <div className="rounded-lg border border-slate-200 p-3">
+              <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-600 dark:bg-slate-800/50">
                 <p className="mb-2 text-sm font-medium text-slate-800">Allowed Environments</p>
                 <div className="max-h-32 space-y-1 overflow-auto">
                   {permissionOptions.envs.map((x) => (
@@ -878,7 +878,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
                   ))}
                 </div>
               </div>
-              <div className="rounded-lg border border-slate-200 p-3">
+              <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-600 dark:bg-slate-800/50">
                 <p className="mb-2 text-sm font-medium text-slate-800">Allowed Compartments</p>
                 <div className="max-h-32 space-y-1 overflow-auto">
                   {permissionOptions.compartments.map((c) => (
@@ -896,7 +896,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
           <div className="rounded-2xl border border-white/60 bg-white/90 p-6 shadow-lg">
             <h3 className="mb-4 text-lg font-semibold text-slate-900">Users</h3>
             {editUser && (
-              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-slate-600 dark:bg-slate-700">
                 <h4 className="mb-3 text-sm font-semibold text-blue-900">Edit User: {editUser.username}</h4>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -918,7 +918,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
                 </div>
                 <div className="mt-3 flex gap-2">
                   <button onClick={saveEditUser} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">Save</button>
-                  <button onClick={() => setEditUser(null)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Cancel</button>
+                  <button onClick={() => setEditUser(null)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-600">Cancel</button>
                 </div>
               </div>
             )}
@@ -939,11 +939,11 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
                         <td className="px-3 py-2 text-xs text-slate-600">teams:{(u.allowed_teams || []).length} apps:{(u.allowed_apps || []).length} envs:{(u.allowed_envs || []).length} comps:{(u.allowed_compartment_ids || []).length}</td>
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2">
-                            <button onClick={() => setEditUser({ ...u, newPassword: '' })} className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200">Edit</button>
+                            <button onClick={() => setEditUser({ ...u, newPassword: '' })} className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 dark:bg-slate-600 dark:text-slate-300 dark:hover:bg-slate-500">Edit</button>
                             {deleteConfirm === u.id ? (
                               <>
                                 <button onClick={() => deleteUser(u.id)} className="rounded bg-rose-600 px-2 py-1 text-xs font-medium text-white hover:bg-rose-700">Confirm</button>
-                                <button onClick={() => setDeleteConfirm(null)} className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200">Cancel</button>
+                                <button onClick={() => setDeleteConfirm(null)} className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 dark:bg-slate-600 dark:text-slate-400 dark:hover:bg-slate-500">Cancel</button>
                               </>
                             ) : (
                               <button onClick={() => setDeleteConfirm(u.id)} className="rounded bg-rose-50 px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-100">Delete</button>
