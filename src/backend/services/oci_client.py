@@ -102,10 +102,10 @@ class OCIClientService:
     def usage_client(self) -> oci.usage_api.UsageapiClient:
         """Get Usage API client for cost data."""
         if self._usage_client is None:
-            # Add timeout for usage API calls
+            # Short timeouts: fail fast and return cached data rather than blocking.
             self._usage_client = oci.usage_api.UsageapiClient(
                 self.config,
-                timeout=(30, 120)  # (connect_timeout, read_timeout)
+                timeout=(10, 15),  # (connect_timeout, read_timeout) in seconds
             )
         return self._usage_client
     

@@ -86,16 +86,19 @@ class CostCalculatorService:
         # Fetch usage data
         response = None
         last_error = None
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = usage_client.request_summarized_usages(request_details)
                 break
+            except oci.exceptions.RequestException as exc:
+                # Network/timeout errors — don't retry, fail fast so caller uses cache.
+                raise
             except oci.exceptions.ServiceError as exc:
                 last_error = exc
                 is_429 = getattr(exc, "status", None) == 429
-                if not is_429 or attempt == 2:
+                if not is_429 or attempt == 1:
                     raise
-                time.sleep(1.5 * (attempt + 1))
+                time.sleep(2.0)
         if response is None and last_error:
             raise last_error
         

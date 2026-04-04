@@ -439,8 +439,23 @@ async def get_costs_summary(
     calculator = get_cost_calculator()
     prev_start, prev_end = _compute_previous_window(start, end)
 
-    current_by_service = calculator.get_costs_by_service(start, end, allowed_resource_ids=allowed_ids)
-    previous_by_service = calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids)
+    def _fetch_summary():
+        return (
+            calculator.get_costs_by_service(start, end, allowed_resource_ids=allowed_ids),
+            calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids),
+            calculator.get_costs_by_resource(start, end, include_skus=False, allowed_resource_ids=allowed_ids),
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        current_by_service, previous_by_service, resource_rows = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_summary), timeout=20.0
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail="OCI Usage API timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"OCI Usage API unavailable: {type(exc).__name__}")
+
     current_total = float(sum(current_by_service.values()))
     previous_total = float(sum(previous_by_service.values()))
     delta_abs = current_total - previous_total
@@ -460,8 +475,6 @@ async def get_costs_summary(
         )
     top_driver = service_rows[0] if service_rows else {"entity": "N/A", "current": 0, "previous": 0, "delta_abs": 0, "delta_pct": 0, "share": 0}
     biggest_mover = max(service_rows, key=lambda r: abs(r["delta_abs"])) if service_rows else top_driver
-
-    resource_rows = calculator.get_costs_by_resource(start, end, include_skus=False, allowed_resource_ids=allowed_ids)
     resource_ids = [r.get("resource_id") for r in resource_rows if r.get("resource_id")]
     resource_types = {
         ocid: rtype for ocid, rtype in db.query(Resource.ocid, Resource.type).filter(Resource.ocid.in_(resource_ids)).all()
@@ -533,12 +546,35 @@ async def get_costs_breakdown(
     prev_start, prev_end = compute_previous_period(start, end_exclusive)
 
     mapping_health = {"unowned_cost": 0.0, "low_confidence_cost": 0.0}
+
+    def _fetch_breakdown():
+        if group_by == "service":
+            return (
+                calculator.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids),
+                calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids),
+                [],
+                [],
+            )
+        return (
+            {},
+            {},
+            calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, allowed_resource_ids=allowed_ids),
+            calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, allowed_resource_ids=allowed_ids),
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        cur_svc, prev_svc, current_rows, previous_rows = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_breakdown), timeout=20.0
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail="OCI Usage API timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"OCI Usage API unavailable: {type(exc).__name__}")
+
     if group_by == "service":
-        current = calculator.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids)
-        previous = calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids)
+        current, previous = cur_svc, prev_svc
     else:
-        current_rows = calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, allowed_resource_ids=allowed_ids)
-        previous_rows = calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, allowed_resource_ids=allowed_ids)
         resource_ids = list({
             *(r.get("resource_id") for r in current_rows if r.get("resource_id")),
             *(r.get("resource_id") for r in previous_rows if r.get("resource_id")),
@@ -608,10 +644,34 @@ async def get_costs_movers(
     start, end_exclusive, days = parse_required_range(start_date, end_date)
     prev_start, prev_end = compute_previous_period(start, end_exclusive)
 
+    def _fetch_movers():
+        if group_by == "service":
+            return (
+                calculator.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids),
+                calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids),
+                [],
+                [],
+            )
+        return (
+            {},
+            {},
+            calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, allowed_resource_ids=allowed_ids),
+            calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, allowed_resource_ids=allowed_ids),
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        _cur_svc, _prev_svc, _cur_rows, _prev_rows = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_movers), timeout=20.0
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail="OCI Usage API timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"OCI Usage API unavailable: {type(exc).__name__}")
+
     items: list[MoversItemModel] = []
     if group_by == "service":
-        current = calculator.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids)
-        previous = calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids)
+        current, previous = _cur_svc, _prev_svc
         names = set(current.keys()) | set(previous.keys())
         for name in names:
             cur = float(current.get(name, 0.0))
@@ -627,8 +687,7 @@ async def get_costs_movers(
                 )
             )
     else:
-        current_rows = calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, allowed_resource_ids=allowed_ids)
-        previous_rows = calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, allowed_resource_ids=allowed_ids)
+        current_rows, previous_rows = _cur_rows, _prev_rows
         prev_by_resource = {r.get("resource_id"): float(r.get("total_cost") or 0.0) for r in previous_rows}
         resource_ids = list({
             *(r.get("resource_id") for r in current_rows if r.get("resource_id")),
@@ -781,7 +840,11 @@ async def get_daily_costs(
         return {"success": True, "data": cached, "cached": True}
     try:
         calculator = get_cost_calculator()
-        daily = calculator.get_daily_costs(start, end, allowed_resource_ids=allowed_ids)
+        loop = asyncio.get_event_loop()
+        daily = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: calculator.get_daily_costs(start, end, allowed_resource_ids=allowed_ids)),
+            timeout=20.0,
+        )
         mtd_total = round(sum(d["total"] for d in daily), 2)
         result = {
             "period": {"start_date": iso_date(start), "end_date": iso_date(end)},

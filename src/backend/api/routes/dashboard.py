@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 
@@ -169,8 +170,28 @@ async def dashboard_summary(
     prev_start, prev_end = compute_previous_period(start, end_exclusive)
 
     calc = get_cost_calculator()
-    current_by_service = calc.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids)
-    previous_by_service = calc.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids)
+
+    def _fetch_all():
+        return (
+            calc.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids),
+            calc.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids),
+            calc.get_costs_by_resource(start, end_exclusive, include_skus=True, allowed_resource_ids=allowed_ids),
+            calc.get_costs_by_resource(prev_start, prev_end, allowed_resource_ids=allowed_ids),
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        current_by_service, previous_by_service, current_resources, previous_resources = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_all),
+            timeout=20.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail="OCI Usage API timed out — please retry shortly")
+    except Exception as exc:
+        err_str = str(exc)
+        if "429" in err_str or "TooManyRequests" in err_str:
+            raise HTTPException(status_code=503, detail="OCI Usage API rate-limited — please retry shortly")
+        raise HTTPException(status_code=503, detail=f"OCI Usage API unavailable: {type(exc).__name__}")
     current_total = float(sum(current_by_service.values()))
     previous_total = float(sum(previous_by_service.values()))
     total_delta = current_total - previous_total
@@ -214,8 +235,6 @@ async def dashboard_summary(
         top_driver = TopDriverModel(group="No data", current=0.0, previous=0.0, share_pct=0.0, delta_abs=0.0, delta_pct=0.0)
         biggest_mover = MoverModel(entity_type="service", entity_name="No data", delta_abs=0.0, delta_pct=0.0)
 
-    current_resources = calc.get_costs_by_resource(start, end_exclusive, include_skus=True, allowed_resource_ids=allowed_ids)
-    previous_resources = calc.get_costs_by_resource(prev_start, prev_end, allowed_resource_ids=allowed_ids)
     previous_by_resource = {r.get("resource_id"): float(r.get("total_cost") or 0.0) for r in previous_resources}
 
     resource_ids = [r.get("resource_id") for r in current_resources if r.get("resource_id")]
