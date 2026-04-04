@@ -255,7 +255,7 @@ function AppLayout() {
                       setActiveRegion(e.target.value);
                       localStorage.setItem('ui_active_region', e.target.value);
                     }}
-                    className="hidden rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs font-medium text-sky-700 sm:block"
+                    className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs font-medium text-sky-700"
                   >
                     <option value="all">All Regions</option>
                     {availableRegions.map((r) => (
