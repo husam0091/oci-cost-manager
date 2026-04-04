@@ -142,7 +142,12 @@ async def test_oci_settings(request: Request, db: Session = Depends(get_db), use
                 "region": data.get("region"),
             },
         }
-    except Exception:
+    except Exception as _exc:
+        import traceback as _tb
+        _reason = f"{type(_exc).__name__}: {_exc}"
+        _trace = _tb.format_exc()
+        import logging as _log
+        _log.getLogger(__name__).error("OCI test failed: %s\n%s", _reason, _trace)
         if row:
             row.status = "failed"
             row.last_tested_at = now
@@ -160,7 +165,7 @@ async def test_oci_settings(request: Request, db: Session = Depends(get_db), use
                 "success": False,
                 "error": {
                     "code": "OCI_TEST_FAILED",
-                    "reason": "redacted",
+                    "reason": _reason,
                     "correlation_id": corr,
                 },
             },

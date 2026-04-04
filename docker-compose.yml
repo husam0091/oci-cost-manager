@@ -80,6 +80,7 @@ services:
       - ${OCI_CONFIG_DIR:-/etc/oci-cost-manager/oci}:/home/app/.oci:ro
       - portal_ssl:/app/portal-ssl
       - exports:/exports
+      - app_data:/app/data
     depends_on:
       pgbouncer:
         condition: service_started
@@ -106,6 +107,7 @@ services:
       OCI_CONFIG_PROFILE: "DEFAULT"
     volumes:
       - ${OCI_CONFIG_DIR:-/etc/oci-cost-manager/oci}:/home/app/.oci:ro
+      - app_data:/app/data
     depends_on:
       backend:
         condition: service_started
@@ -133,6 +135,7 @@ volumes:
   pgdata:
   exports:
   portal_ssl:
+  app_data:
 
 networks:
   app_internal:
