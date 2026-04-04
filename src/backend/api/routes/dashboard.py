@@ -52,8 +52,19 @@ def _to_iso_utc(dt: Optional[datetime]) -> Optional[str]:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _cache_key(start_date: str, end_date: str, compare: str) -> str:
-    return f"dashboard_summary|start={start_date}|end={end_date}|compare={compare}"
+def _cache_key(start_date: str, end_date: str, compare: str, region: Optional[str] = None) -> str:
+    base = f"dashboard_summary|start={start_date}|end={end_date}|compare={compare}"
+    if region and region != "all":
+        base += f"|region={region}"
+    return base
+
+
+def _get_allowed_resource_ids(db: Session, region: Optional[str]):
+    """Return set of resource OCIDs for the given region, or None for no filter."""
+    if not region or region == "all":
+        return None
+    rows = db.query(Resource.ocid).filter(Resource.region == region).all()
+    return {r.ocid for r in rows if r.ocid}
 
 
 def _safe_pct(delta: float, base: float) -> float:
@@ -136,6 +147,7 @@ async def dashboard_summary(
     start_date: str = Query(..., description="ISO date/datetime start"),
     end_date: str = Query(..., description="ISO date/datetime end (inclusive)"),
     compare: str = Query("previous"),
+    region: Optional[str] = Query(None, description="Filter to a specific OCI region (omit or 'all' for all regions)"),
     db: Session = Depends(get_db),
 ):
     """Locked contract summary endpoint for decision-first dashboard."""
@@ -146,7 +158,8 @@ async def dashboard_summary(
     end_exclusive = parse_iso_datetime(end_date, is_end=True, required=True)
     normalized_start = iso_date(start)
     normalized_end = iso_date(end_exclusive - timedelta(days=1))
-    cached = get_cached(_cache_key(normalized_start, normalized_end, compare))
+    allowed_ids = _get_allowed_resource_ids(db, region)
+    cached = get_cached(_cache_key(normalized_start, normalized_end, compare, region=region))
     if cached is not None:
         return DashboardSummaryResponse(**cached)
     if end_exclusive <= start:
@@ -156,8 +169,8 @@ async def dashboard_summary(
     prev_start, prev_end = compute_previous_period(start, end_exclusive)
 
     calc = get_cost_calculator()
-    current_by_service = calc.get_costs_by_service(start, end_exclusive)
-    previous_by_service = calc.get_costs_by_service(prev_start, prev_end)
+    current_by_service = calc.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids)
+    previous_by_service = calc.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids)
     current_total = float(sum(current_by_service.values()))
     previous_total = float(sum(previous_by_service.values()))
     total_delta = current_total - previous_total
@@ -201,8 +214,8 @@ async def dashboard_summary(
         top_driver = TopDriverModel(group="No data", current=0.0, previous=0.0, share_pct=0.0, delta_abs=0.0, delta_pct=0.0)
         biggest_mover = MoverModel(entity_type="service", entity_name="No data", delta_abs=0.0, delta_pct=0.0)
 
-    current_resources = calc.get_costs_by_resource(start, end_exclusive, include_skus=True)
-    previous_resources = calc.get_costs_by_resource(prev_start, prev_end, include_skus=True)
+    current_resources = calc.get_costs_by_resource(start, end_exclusive, include_skus=True, allowed_resource_ids=allowed_ids)
+    previous_resources = calc.get_costs_by_resource(prev_start, prev_end, allowed_resource_ids=allowed_ids)
     previous_by_resource = {r.get("resource_id"): float(r.get("total_cost") or 0.0) for r in previous_resources}
 
     resource_ids = [r.get("resource_id") for r in current_resources if r.get("resource_id")]
@@ -479,5 +492,5 @@ async def dashboard_summary(
         top_cost_driver_this_month=top_driver_sentence,
     )
     response = DashboardSummaryResponse(success=True, data=data)
-    set_cached(_cache_key(normalized_start, normalized_end, compare), response.model_dump(), SUMMARY_CACHE_TTL)
+    set_cached(_cache_key(normalized_start, normalized_end, compare, region=region), response.model_dump(), SUMMARY_CACHE_TTL)
     return response

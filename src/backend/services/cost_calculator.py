@@ -130,57 +130,65 @@ class CostCalculatorService:
         start_date: datetime,
         end_date: datetime,
         services: Optional[List[str]] = None,
+        allowed_resource_ids: Optional[set] = None,
     ) -> Dict[str, float]:
         """Get costs grouped by service.
-        
-        Args:
-            start_date: Start of the reporting period.
-            end_date: End of the reporting period.
-            services: Optional list of services to filter.
-            
-        Returns:
-            Dictionary mapping service names to costs.
+
+        When allowed_resource_ids is provided the result is filtered to only
+        include line-items belonging to those resource OCIDs (region filter).
         """
-        # Check cache first
+        if allowed_resource_ids is not None:
+            # Must fetch with resourceId dimension so we can filter per resource.
+            items = self.get_usage_summary(
+                start_date=start_date,
+                end_date=end_date,
+                group_by=["service", "resourceId"],
+            )
+            costs: Dict[str, float] = {}
+            for item in items:
+                rid = item.get("resource_id") or ""
+                if rid and rid not in allowed_resource_ids:
+                    continue
+                service = item.get("service") or "Unknown"
+                if services and service not in services:
+                    continue
+                costs[service] = costs.get(service, 0.0) + float(item.get("computed_amount") or 0)
+            return costs
+
+        # Unfiltered fast path (cacheable).
         cache_key = f"costs_by_service_{start_date.date()}_{end_date.date()}"
         cached = get_cached(cache_key)
         if cached is not None:
             return cached
-        
+
         items = self.get_usage_summary(
             start_date=start_date,
             end_date=end_date,
             group_by=["service"],
         )
-        
+
         costs = {}
         for item in items:
             service = item.get("service", "Unknown")
             if services and service not in services:
                 continue
             costs[service] = costs.get(service, 0) + item.get("computed_amount", 0)
-        
-        # Cache the result
+
         set_cached(cache_key, costs)
-        
         return costs
-    
+
     def get_costs_by_resource(
         self,
         start_date: datetime,
         end_date: datetime,
         compartment_id: Optional[str] = None,
         include_skus: bool = True,
+        allowed_resource_ids: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
         """Get costs grouped by resource.
-        
-        Args:
-            start_date: Start of the reporting period.
-            end_date: End of the reporting period.
-            compartment_id: Optional compartment filter.
-            
-        Returns:
-            List of resource cost items.
+
+        When allowed_resource_ids is provided only those resource OCIDs are
+        returned (region filter).
         """
         group_by = ["resourceId", "skuName"] if include_skus else ["resourceId"]
         items = self.get_usage_summary(
@@ -189,7 +197,7 @@ class CostCalculatorService:
             group_by=group_by,
             compartment_id=compartment_id,
         )
-        
+
         # Aggregate by resource
         resource_costs = {}
         for item in items:
@@ -202,7 +210,7 @@ class CostCalculatorService:
                     "total_cost": 0,
                     "skus": [],
                 }
-            
+
             resource_costs[resource_id]["total_cost"] += item.get("computed_amount", 0)
             if include_skus:
                 resource_costs[resource_id]["skus"].append({
@@ -212,8 +220,11 @@ class CostCalculatorService:
                     "unit": item.get("unit"),
                     "cost": item.get("computed_amount"),
                 })
-        
-        return list(resource_costs.values())
+
+        result = list(resource_costs.values())
+        if allowed_resource_ids is not None:
+            result = [r for r in result if r.get("resource_id") in allowed_resource_ids]
+        return result
     
     def get_database_costs(
         self,
@@ -292,12 +303,39 @@ class CostCalculatorService:
         self,
         start_date: datetime,
         end_date: datetime,
+        allowed_resource_ids: Optional[set] = None,
     ) -> List[Dict[str, Any]]:
-        """Get costs broken down by day and service (mirrors OCI Cost Analysis daily view).
+        """Get costs broken down by day and service.
 
-        Returns:
-            List of {date, total, by_service} dicts ordered by date.
+        When allowed_resource_ids is provided, only those resources are summed
+        (region filter).
         """
+        if allowed_resource_ids is not None:
+            items = self.get_usage_summary(
+                start_date=start_date,
+                end_date=end_date,
+                granularity="DAILY",
+                group_by=["service", "resourceId"],
+            )
+            by_date: Dict[str, Dict] = {}
+            for item in items:
+                rid = item.get("resource_id") or ""
+                if rid and rid not in allowed_resource_ids:
+                    continue
+                date_key = (item.get("time_usage_started") or "")[:10]
+                if not date_key:
+                    continue
+                service = item.get("service") or "Other"
+                cost = float(item.get("computed_amount") or 0)
+                if date_key not in by_date:
+                    by_date[date_key] = {"date": date_key, "total": 0.0, "by_service": {}}
+                by_date[date_key]["total"] = round(by_date[date_key]["total"] + cost, 4)
+                by_date[date_key]["by_service"][service] = round(
+                    by_date[date_key]["by_service"].get(service, 0.0) + cost, 4
+                )
+            return [v for _, v in sorted(by_date.items())]
+
+        # Unfiltered fast path (cacheable).
         cache_key = f"daily_costs_{start_date.date()}_{end_date.date()}"
         cached = get_cached(cache_key)
         if cached is not None:
@@ -310,21 +348,21 @@ class CostCalculatorService:
             group_by=["service"],
         )
 
-        by_date: Dict[str, Dict] = {}
+        by_date_un: Dict[str, Dict] = {}
         for item in items:
             date_key = (item.get("time_usage_started") or "")[:10]
             if not date_key:
                 continue
             service = item.get("service") or "Other"
             cost = float(item.get("computed_amount") or 0)
-            if date_key not in by_date:
-                by_date[date_key] = {"date": date_key, "total": 0.0, "by_service": {}}
-            by_date[date_key]["total"] = round(by_date[date_key]["total"] + cost, 4)
-            by_date[date_key]["by_service"][service] = round(
-                by_date[date_key]["by_service"].get(service, 0.0) + cost, 4
+            if date_key not in by_date_un:
+                by_date_un[date_key] = {"date": date_key, "total": 0.0, "by_service": {}}
+            by_date_un[date_key]["total"] = round(by_date_un[date_key]["total"] + cost, 4)
+            by_date_un[date_key]["by_service"][service] = round(
+                by_date_un[date_key]["by_service"].get(service, 0.0) + cost, 4
             )
 
-        result = [v for _, v in sorted(by_date.items())]
+        result = [v for _, v in sorted(by_date_un.items())]
         set_cached(cache_key, result)
         return result
 

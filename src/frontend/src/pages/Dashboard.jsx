@@ -379,7 +379,7 @@ function DataFreshnessPanel({ lastScan, ociStatus }) {
   );
 }
 
-function Dashboard({ persona = 'Executive' }) {
+function Dashboard({ persona = 'Executive', activeRegion }) {
   const period = useMemo(() => getDateRangeForPreset('prev_month'), []);
 
   const [moversGroupBy, setMoversGroupBy] = useState('service');
@@ -397,6 +397,7 @@ function Dashboard({ persona = 'Executive' }) {
       start_date: period.start,
       end_date: period.end,
       compare: 'previous',
+      region: activeRegion,
     });
 
     const [breakdownRes, moversRes] = await Promise.all([
@@ -407,6 +408,7 @@ function Dashboard({ persona = 'Executive' }) {
         compare: 'previous',
         limit: 8,
         min_share_pct: 0.5,
+        region: activeRegion,
       }),
       costsMoversV2({
         group_by: moversGroupBy,
@@ -415,6 +417,7 @@ function Dashboard({ persona = 'Executive' }) {
         compare: 'previous',
         limit: 10,
         direction: moversDirection,
+        region: activeRegion,
       }),
     ]);
 
@@ -423,7 +426,7 @@ function Dashboard({ persona = 'Executive' }) {
       breakdown: breakdownRes.data?.data || null,
       movers: moversRes.data?.data || null,
     };
-  }, [period.end, period.start, moversDirection, moversGroupBy]);
+  }, [period.end, period.start, moversDirection, moversGroupBy, activeRegion]);
 
   const {
     data: dashboardData,
@@ -435,10 +438,10 @@ function Dashboard({ persona = 'Executive' }) {
     refresh,
     hasData,
   } = useStaleSnapshotQuery({
-    cacheKey: `dashboard:${period.start}:${period.end}:${moversGroupBy}:${moversDirection}`,
+    cacheKey: `dashboard:${period.start}:${period.end}:${moversGroupBy}:${moversDirection}:${activeRegion || 'all'}`,
     ttlMs: 5 * 60 * 1000,
     queryFn: loadDashboardData,
-    dependencies: [period.start, period.end, moversGroupBy, moversDirection],
+    dependencies: [period.start, period.end, moversGroupBy, moversDirection, activeRegion],
     fallbackError: 'Failed to load dashboard data',
   });
 
@@ -471,10 +474,10 @@ function Dashboard({ persona = 'Executive' }) {
       .then((res) => setSubscriptionData(res?.data?.data || null))
       .catch(() => {});
     // Daily cost chart
-    getDailyCosts()
+    getDailyCosts({ region: activeRegion })
       .then((res) => setDailyData(res?.data?.data || null))
       .catch(() => {});
-  }, []);
+  }, [activeRegion]);
 
   useEffect(() => {
     setExecutiveView(persona === 'Executive');

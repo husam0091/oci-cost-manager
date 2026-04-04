@@ -242,7 +242,8 @@ const resolveDateRange = (params = {}) => {
 };
 export const getCostSummary = (params = {}) => {
   const { start_date, end_date } = resolveDateRange(params);
-  return api.get('/dashboard/summary', { params: { start_date, end_date, compare: 'previous' } }).then((res) => {
+  const region = params.region && params.region !== 'all' ? params.region : undefined;
+  return api.get('/dashboard/summary', { params: { start_date, end_date, compare: 'previous', ...(region ? { region } : {}) } }).then((res) => {
     const d = res?.data?.data || {};
     return {
       ...res,
@@ -272,7 +273,8 @@ export const getCostBreakdown = (params = {}) => {
   const compare = params.compare || 'previous';
   const limit = params.limit || 20;
   const min_share_pct = params.min_share_pct ?? 0;
-  return api.get('/costs/breakdown', { params: { group_by, start_date, end_date, compare, limit, min_share_pct } }).then((res) => ({
+  const region = params.region && params.region !== 'all' ? params.region : undefined;
+  return api.get('/costs/breakdown', { params: { group_by, start_date, end_date, compare, limit, min_share_pct, ...(region ? { region } : {}) } }).then((res) => ({
     ...res,
     data: {
       ...res.data,
@@ -289,7 +291,8 @@ export const getCostMovers = (params = {}) => {
   const compare = params.compare || 'previous';
   const limit = params.limit || 20;
   const direction = params.direction || 'up';
-  return api.get('/costs/movers', { params: { group_by, start_date, end_date, compare, limit, direction } }).then((res) => ({
+  const region = params.region && params.region !== 'all' ? params.region : undefined;
+  return api.get('/costs/movers', { params: { group_by, start_date, end_date, compare, limit, direction, ...(region ? { region } : {}) } }).then((res) => ({
     ...res,
     data: {
       ...res.data,
@@ -353,11 +356,12 @@ export const costsMovers = ({
 };
 
 // Explicit V2 bindings used by Dashboard to avoid legacy wrapper ambiguity.
-export const dashboardSummaryV2 = ({ start_date, end_date }) =>
+export const dashboardSummaryV2 = ({ start_date, end_date, region }) =>
   api.get('/dashboard/summary', {
     params: {
       start_date: _toIsoDate(start_date),
       end_date: _toIsoDate(end_date),
+      ...(region && region !== 'all' ? { region } : {}),
     },
   });
 
@@ -368,6 +372,7 @@ export const costsBreakdownV2 = ({
   compare = 'previous',
   limit = 8,
   min_share_pct = 0.5,
+  region,
 }) =>
   api.get('/costs/breakdown', {
     params: {
@@ -377,6 +382,7 @@ export const costsBreakdownV2 = ({
       compare,
       limit,
       min_share_pct,
+      ...(region && region !== 'all' ? { region } : {}),
     },
   });
 
@@ -387,6 +393,7 @@ export const costsMoversV2 = ({
   compare = 'previous',
   limit = 10,
   direction = 'up',
+  region,
 }) =>
   api.get('/costs/movers', {
     params: {
@@ -396,6 +403,7 @@ export const costsMoversV2 = ({
       compare,
       limit,
       direction,
+      ...(region && region !== 'all' ? { region } : {}),
     },
   });
 export const recommendationsSummary = ({ start_date, end_date }) => {
@@ -473,7 +481,10 @@ export const checkHealthReady = () => api.get('/health/ready');
 export const checkOCIHealth = () => api.get('/health/oci');
 
 // Daily cost breakdown (OCI Cost Analysis view)
-export const getDailyCosts = (params = {}) => api.get('/costs/daily', { params });
+export const getDailyCosts = (params = {}) => {
+  const region = params.region && params.region !== 'all' ? params.region : undefined;
+  return api.get('/costs/daily', { params: { ...params, ...(region ? { region } : { region: undefined }) } });
+};
 
 // Universal Credits subscriptions
 export const getSubscriptions = () => api.get('/subscriptions');

@@ -26,7 +26,7 @@ function WidgetSkeleton({ className = '' }) {
   return <div className={`animate-pulse rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${className}`} />;
 }
 
-function Costs() {
+function Costs({ activeRegion }) {
   const [period, setPeriod] = useState('prev_month');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -57,7 +57,7 @@ function Costs() {
     if (!range || !customReady) {
       return null;
     }
-    const params = { start_date: range.start, end_date: range.end };
+    const params = { start_date: range.start, end_date: range.end, region: activeRegion };
     const [summaryRes, breakdownRes, moversRes, resourceRes, dbRes] = await Promise.all([
       getCostSummary(params),
       getCostBreakdown({ ...params, group_by: groupBy, compare: 'previous', limit: 8, min_share_pct: 0.5 }),
@@ -79,7 +79,7 @@ function Costs() {
       resourceMovers: resourceRes.data?.data?.items || [],
       dbCosts,
     };
-  }, [customReady, groupBy, range]);
+  }, [customReady, groupBy, range, activeRegion]);
 
   const {
     data: costsData,
@@ -91,10 +91,10 @@ function Costs() {
     refresh,
     hasData,
   } = useStaleSnapshotQuery({
-    cacheKey: `costs:${range?.start || 'none'}:${range?.end || 'none'}:${groupBy}`,
+    cacheKey: `costs:${range?.start || 'none'}:${range?.end || 'none'}:${groupBy}:${activeRegion || 'all'}`,
     ttlMs: 60 * 60 * 1000,
     queryFn: loadCostsData,
-    dependencies: [range?.start, range?.end, groupBy, customReady],
+    dependencies: [range?.start, range?.end, groupBy, customReady, activeRegion],
     fallbackError: 'Failed to load cost analysis',
   });
 

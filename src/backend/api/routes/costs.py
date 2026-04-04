@@ -85,6 +85,15 @@ def _cache_key(prefix: str, **parts: object) -> str:
     return f"{prefix}|{ordered}"
 
 
+def _get_allowed_resource_ids(db: Session, region: Optional[str]):
+    """Return set of resource OCIDs for the given region, or None for no filter."""
+    if not region or region == "all":
+        return None
+    from core.models import Resource as _Resource
+    rows = db.query(_Resource.ocid).filter(_Resource.region == region).all()
+    return {r.ocid for r in rows if r.ocid}
+
+
 def _get_tag_value(details: dict, group_by: Literal["env", "team", "app"]) -> str:
     tags = (details.get("defined_tags") or {}) | (details.get("freeform_tags") or {})
     if group_by == "env":
@@ -304,24 +313,27 @@ async def get_costs_by_resource(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     include_skus: bool = Query(True, description="Include SKU line items per resource"),
+    region: Optional[str] = Query(None, description="Filter to a specific OCI region"),
     db: Session = Depends(get_db),
 ):
     """Get costs grouped by resource."""
-    cache_key = f"costs_by_resource_{compartment_id or 'all'}_{start_date or 'auto'}_{end_date or 'auto'}_{'skus' if include_skus else 'noskus'}"
+    cache_key = f"costs_by_resource_{compartment_id or 'all'}_{start_date or 'auto'}_{end_date or 'auto'}_{'skus' if include_skus else 'noskus'}_{region or 'all'}"
     try:
         calculator = get_cost_calculator()
-        
+        allowed_ids = _get_allowed_resource_ids(db, region)
+
         # Parse dates. End date is treated inclusively for date-only inputs.
         start = _parse_cost_date(start_date, is_end=False)
         end = _parse_cost_date(end_date, is_end=True)
         if end <= start:
             raise HTTPException(status_code=422, detail="end_date must be after start_date")
-        
+
         resource_costs = calculator.get_costs_by_resource(
             start,
             end,
             compartment_id,
             include_skus=include_skus,
+            allowed_resource_ids=allowed_ids,
         )
 
         # Normalize workload categories in backend so frontend does not duplicate SKU mapping.
@@ -405,6 +417,7 @@ async def get_database_costs(
 async def get_costs_summary(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    region: Optional[str] = Query(None, description="Filter to a specific OCI region"),
     db: Session = Depends(get_db),
 ):
     """Decision-driving cost summary with period deltas and governance signals."""
@@ -412,10 +425,12 @@ async def get_costs_summary(
     end = _parse_cost_date(end_date, is_end=True)
     if end <= start:
         raise HTTPException(status_code=422, detail="end_date must be after start_date")
+    allowed_ids = _get_allowed_resource_ids(db, region)
     cache_key = _cache_key(
         "agg_summary",
         start=iso_date(start),
         end=iso_date(end - timedelta(days=1)),
+        region=region or "",
     )
     cached = get_cached(cache_key)
     if cached is not None:
@@ -424,8 +439,8 @@ async def get_costs_summary(
     calculator = get_cost_calculator()
     prev_start, prev_end = _compute_previous_window(start, end)
 
-    current_by_service = calculator.get_costs_by_service(start, end)
-    previous_by_service = calculator.get_costs_by_service(prev_start, prev_end)
+    current_by_service = calculator.get_costs_by_service(start, end, allowed_resource_ids=allowed_ids)
+    previous_by_service = calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids)
     current_total = float(sum(current_by_service.values()))
     previous_total = float(sum(previous_by_service.values()))
     delta_abs = current_total - previous_total
@@ -446,7 +461,7 @@ async def get_costs_summary(
     top_driver = service_rows[0] if service_rows else {"entity": "N/A", "current": 0, "previous": 0, "delta_abs": 0, "delta_pct": 0, "share": 0}
     biggest_mover = max(service_rows, key=lambda r: abs(r["delta_abs"])) if service_rows else top_driver
 
-    resource_rows = calculator.get_costs_by_resource(start, end, include_skus=False)
+    resource_rows = calculator.get_costs_by_resource(start, end, include_skus=False, allowed_resource_ids=allowed_ids)
     resource_ids = [r.get("resource_id") for r in resource_rows if r.get("resource_id")]
     resource_types = {
         ocid: rtype for ocid, rtype in db.query(Resource.ocid, Resource.type).filter(Resource.ocid.in_(resource_ids)).all()
@@ -491,6 +506,7 @@ async def get_costs_breakdown(
     compare: str = Query("previous"),
     limit: int = Query(8, ge=1, le=50),
     min_share_pct: float = Query(0.5, ge=0.0, le=100.0),
+    region: Optional[str] = Query(None, description="Filter to a specific OCI region"),
     db: Session = Depends(get_db),
 ):
     """Aggregated breakdown contract: top-N + Other with deterministic schema."""
@@ -502,6 +518,7 @@ async def get_costs_breakdown(
         compare=compare,
         limit=limit,
         min_share_pct=min_share_pct,
+        region=region or "",
     )
     cached = get_cached(cache_key)
     if cached is not None:
@@ -510,17 +527,18 @@ async def get_costs_breakdown(
     if compare != "previous":
         raise HTTPException(status_code=422, detail="compare must be 'previous'")
 
+    allowed_ids = _get_allowed_resource_ids(db, region)
     calculator = get_cost_calculator()
     start, end_exclusive, days = parse_required_range(start_date, end_date)
     prev_start, prev_end = compute_previous_period(start, end_exclusive)
 
     mapping_health = {"unowned_cost": 0.0, "low_confidence_cost": 0.0}
     if group_by == "service":
-        current = calculator.get_costs_by_service(start, end_exclusive)
-        previous = calculator.get_costs_by_service(prev_start, prev_end)
+        current = calculator.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids)
+        previous = calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids)
     else:
-        current_rows = calculator.get_costs_by_resource(start, end_exclusive, include_skus=False)
-        previous_rows = calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False)
+        current_rows = calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, allowed_resource_ids=allowed_ids)
+        previous_rows = calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, allowed_resource_ids=allowed_ids)
         resource_ids = list({
             *(r.get("resource_id") for r in current_rows if r.get("resource_id")),
             *(r.get("resource_id") for r in previous_rows if r.get("resource_id")),
@@ -564,6 +582,7 @@ async def get_costs_movers(
     compare: str = Query("previous"),
     limit: int = Query(20, ge=1, le=200),
     direction: Literal["up", "down", "both"] = Query("both"),
+    region: Optional[str] = Query(None, description="Filter to a specific OCI region"),
     db: Session = Depends(get_db),
 ):
     """Delta-based movers for what-changed decisions."""
@@ -575,6 +594,7 @@ async def get_costs_movers(
         compare=compare,
         limit=limit,
         direction=direction,
+        region=region or "",
     )
     cached = get_cached(cache_key)
     if cached is not None:
@@ -583,14 +603,15 @@ async def get_costs_movers(
     if compare != "previous":
         raise HTTPException(status_code=422, detail="compare must be 'previous'")
 
+    allowed_ids = _get_allowed_resource_ids(db, region)
     calculator = get_cost_calculator()
     start, end_exclusive, days = parse_required_range(start_date, end_date)
     prev_start, prev_end = compute_previous_period(start, end_exclusive)
 
     items: list[MoversItemModel] = []
     if group_by == "service":
-        current = calculator.get_costs_by_service(start, end_exclusive)
-        previous = calculator.get_costs_by_service(prev_start, prev_end)
+        current = calculator.get_costs_by_service(start, end_exclusive, allowed_resource_ids=allowed_ids)
+        previous = calculator.get_costs_by_service(prev_start, prev_end, allowed_resource_ids=allowed_ids)
         names = set(current.keys()) | set(previous.keys())
         for name in names:
             cur = float(current.get(name, 0.0))
@@ -606,8 +627,8 @@ async def get_costs_movers(
                 )
             )
     else:
-        current_rows = calculator.get_costs_by_resource(start, end_exclusive, include_skus=False)
-        previous_rows = calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False)
+        current_rows = calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, allowed_resource_ids=allowed_ids)
+        previous_rows = calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, allowed_resource_ids=allowed_ids)
         prev_by_resource = {r.get("resource_id"): float(r.get("total_cost") or 0.0) for r in previous_rows}
         resource_ids = list({
             *(r.get("resource_id") for r in current_rows if r.get("resource_id")),
@@ -744,6 +765,8 @@ async def get_insights(
 async def get_daily_costs(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD), defaults to first of current month"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD), defaults to today"),
+    region: Optional[str] = Query(None, description="Filter to a specific OCI region"),
+    db: Session = Depends(get_db),
 ):
     """Daily cost breakdown by service - mirrors OCI Cost Analysis daily view."""
     today = datetime.now(UTC)
@@ -751,13 +774,14 @@ async def get_daily_costs(
     end = _parse_cost_date(end_date, is_end=True) if end_date else today
     if end <= start:
         raise HTTPException(status_code=422, detail="end_date must be after start_date")
-    cache_key = _cache_key("daily_costs", start=iso_date(start), end=iso_date(end))
+    allowed_ids = _get_allowed_resource_ids(db, region)
+    cache_key = _cache_key("daily_costs", start=iso_date(start), end=iso_date(end), region=region or "")
     cached = get_cached(cache_key)
     if cached is not None:
         return {"success": True, "data": cached, "cached": True}
     try:
         calculator = get_cost_calculator()
-        daily = calculator.get_daily_costs(start, end)
+        daily = calculator.get_daily_costs(start, end, allowed_resource_ids=allowed_ids)
         mtd_total = round(sum(d["total"] for d in daily), 2)
         result = {
             "period": {"start_date": iso_date(start), "end_date": iso_date(end)},
