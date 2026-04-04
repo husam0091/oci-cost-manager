@@ -1,7 +1,6 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: oci-cost-manager-postgres
     environment:
       POSTGRES_DB: ocicost
       POSTGRES_USER: ocicost_user
@@ -19,7 +18,6 @@ services:
 
   pgbouncer:
     image: edoburu/pgbouncer:v1.25.1-p0
-    container_name: oci-cost-manager-pgbouncer
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,15 +33,12 @@ services:
       DEFAULT_POOL_SIZE: 50
       RESERVE_POOL_SIZE: 25
       SERVER_RESET_QUERY: DISCARD ALL
-    ports:
-      - "6432:5432"
     networks:
       - app_internal
     restart: unless-stopped
 
   redis:
     image: redis:8.2-alpine
-    container_name: oci-cost-manager-redis
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     networks:
       - app_internal
@@ -53,7 +48,6 @@ services:
     build:
       context: ./src/backend
       dockerfile: Dockerfile
-    container_name: oci-cost-manager-backend
     env_file:
       - ./deploy/.env.production
     expose:
@@ -94,7 +88,6 @@ services:
     build:
       context: ./src/backend
       dockerfile: Dockerfile
-    container_name: oci-cost-manager-worker
     env_file:
       - ./deploy/.env.production
     command: ["bash", "-lc", "celery -A worker.celery_app worker -Q default,heavy -l INFO"]
@@ -119,7 +112,6 @@ services:
     build:
       context: ./src/frontend
       dockerfile: Dockerfile
-    container_name: oci-cost-manager-frontend
     ports:
       - "8080:8080"
       - "8443:8443"

@@ -11,7 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends gosu dos2unix && rm -rf /var/lib/apt/lists/* \
+    && dos2unix /app/docker-entrypoint.sh \
     && addgroup --system app && adduser --system --ingroup app --uid 10001 app \
     && mkdir -p /home/app/.oci /data /exports /tmp /app/portal-ssl \
     && chown -R app:app /app /home/app /data /exports /tmp \

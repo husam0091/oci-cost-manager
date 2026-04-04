@@ -109,20 +109,15 @@ Built for FinOps teams, cloud architects, and platform engineers who need more t
 git clone https://github.com/husam0091/oci-cost-manager.git
 cd oci-cost-manager
 
-# 2. Configure
-cp .env.example .env
-# Edit .env — set OCI_CONFIG_USER, OCI_CONFIG_TENANCY, OCI_CONFIG_FINGERPRINT,
-#             OCI_CONFIG_KEY_CONTENT (or OCI_CONFIG_KEY_FILE), OCI_CONFIG_REGION
-
-# 3. Start
+# 2. Start  (no pre-configuration needed — OCI credentials are configured via the UI)
 docker compose up -d --build
 
-# 4. Open
+# 3. Open
 open http://localhost:8080
-# Default credentials: admin / changeme  (update immediately in Settings)
+# Default credentials: admin / admin  (update immediately in Settings)
 ```
 
-The first login will prompt you to configure your OCI connection. Once saved, trigger an initial scan from **Settings → Scan Now**.
+The app starts with no OCI credentials pre-loaded. On first login, go to **Settings → OCI Connection** to enter your tenancy OCID, user OCID, fingerprint, region, and upload your PEM private key. Once saved, trigger an initial scan from **Settings → Scan Now**.
 
 ---
 
@@ -131,10 +126,9 @@ The first login will prompt you to configure your OCI connection. Once saved, tr
 ```bash
 git clone https://github.com/husam0091/oci-cost-manager.git
 cd oci-cost-manager
-cp .env.example .env
 ```
 
-Edit `.env` with your OCI credentials and preferred settings, then:
+Start the stack:
 
 ```bash
 docker compose up -d --build

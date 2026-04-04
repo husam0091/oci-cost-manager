@@ -36,10 +36,12 @@ build/
 *.env.local
 src/backend/.env
 
-# OCI secrets
+# OCI secrets and certificates
 .oci/
 *.pem
 *.key
+*.p12
+*.pfx
 oci_api_key.pem
 
 # Docker volumes / local data
