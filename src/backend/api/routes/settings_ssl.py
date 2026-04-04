@@ -68,7 +68,7 @@ def _leaf_meta(cert_pem: bytes) -> dict:
         "subject": cert.subject.rfc4514_string(),
         "issuer": cert.issuer.rfc4514_string(),
         "common_name": cn_attr[0].value if cn_attr else None,
-        "expires_at": cert.not_valid_after_utc,
+        "expires_at": getattr(cert, "not_valid_after_utc", None) or getattr(cert, "not_valid_after", None),
     }
 
 
