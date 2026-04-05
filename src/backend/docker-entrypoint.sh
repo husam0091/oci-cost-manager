@@ -34,4 +34,32 @@ if _is_placeholder; then
 fi
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Auto-generate APP_SECRET (JWT signing key) if missing or placeholder ─────
+# The key is persisted alongside the master key so JWTs remain valid across
+# container restarts.  Anyone pulling from scratch gets a unique secure key.
+_SECRET_FILE="/app/data/.app_secret"
+_is_placeholder_secret() {
+    case "$APP_SECRET" in
+        dev-secret*|""|CHANGE_ME*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if _is_placeholder_secret; then
+    mkdir -p /app/data
+    chown app:app /app/data
+    if [ -f "$_SECRET_FILE" ]; then
+        APP_SECRET=$(cat "$_SECRET_FILE")
+        echo "[startup] Loaded APP_SECRET from persisted volume."
+    else
+        APP_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
+        echo "$APP_SECRET" > "$_SECRET_FILE"
+        chmod 600 "$_SECRET_FILE"
+        chown app:app "$_SECRET_FILE"
+        echo "[startup] Generated new APP_SECRET and saved to volume."
+    fi
+    export APP_SECRET
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
 exec gosu app:app "$@"
