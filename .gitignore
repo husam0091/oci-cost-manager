@@ -6,6 +6,12 @@ __pycache__/
 .mypy_cache/
 *.log
 
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
 # Virtual environments
 venv/
 .venv/

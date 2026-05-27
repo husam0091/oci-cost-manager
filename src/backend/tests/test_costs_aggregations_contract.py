@@ -13,7 +13,7 @@ class FakeCalcBreakdown:
     def __init__(self):
         self.service_calls = []
 
-    def get_costs_by_service(self, start, end):
+    def get_costs_by_service(self, start, end, region=None):
         self.service_calls.append((start, end))
         if len(self.service_calls) == 1:
             return {
@@ -29,12 +29,12 @@ class FakeCalcBreakdown:
             "DB": 10.0,
         }
 
-    def get_costs_by_resource(self, start, end, include_skus=False, compartment_id=None):
+    def get_costs_by_resource(self, start, end, include_skus=False, compartment_id=None, region=None):
         return []
 
 
 class FakeCalcBreakdownMany:
-    def get_costs_by_service(self, start, end):
+    def get_costs_by_service(self, start, end, region=None):
         return {
             "A": 100.0,
             "B": 90.0,
@@ -48,29 +48,36 @@ class FakeCalcBreakdownMany:
             "J": 10.0,
         }
 
-    def get_costs_by_resource(self, start, end, include_skus=False, compartment_id=None):
+    def get_costs_by_resource(self, start, end, include_skus=False, compartment_id=None, region=None):
         return []
 
 
 class FakeCalcEmpty:
-    def get_costs_by_service(self, start, end):
+    def get_costs_by_service(self, start, end, region=None):
         return {}
 
-    def get_costs_by_resource(self, start, end, include_skus=False, compartment_id=None):
+    def get_costs_by_resource(self, start, end, include_skus=False, compartment_id=None, region=None):
         return []
 
 
 class FakeCalcMovers:
     def __init__(self):
         self.service_calls = []
+        self.compartment_calls = []
 
-    def get_costs_by_service(self, start, end):
+    def get_costs_by_service(self, start, end, region=None):
         self.service_calls.append((start, end))
         if len(self.service_calls) == 1:
             return {"Compute": 200.0, "Storage": 100.0, "Network": 50.0}
         return {"Compute": 100.0, "Storage": 120.0, "Network": 50.0}
 
-    def get_costs_by_resource(self, start, end, include_skus=False, compartment_id=None):
+    def get_costs_by_compartment(self, start, end, region=None):
+        self.compartment_calls.append((start, end))
+        if len(self.compartment_calls) == 1:
+            return {"Finance": 200.0, "IT": 100.0}
+        return {"Finance": 150.0, "IT": 110.0}
+
+    def get_costs_by_resource(self, start, end, include_skus=False, compartment_id=None, region=None):
         if len(self.service_calls) == 0:
             return [
                 {"resource_id": "ocid1.instance.oc1..aaaaaaaaaaaaaaaa", "total_cost": 300.0, "compartment_name": "Finance"},
@@ -106,8 +113,12 @@ class FakeQuery:
 
 
 class FakeDB:
-    def query(self, _model):
-        model_name = getattr(_model, "__name__", "")
+    def query(self, *models):
+        first = models[0] if models else None
+        model_name = getattr(first, "__name__", "")
+        # When the route queries (Compartment.id, Compartment.name) we return name-mapping tuples.
+        if not model_name and len(models) >= 2:
+            return FakeQuery([("finance", "Finance"), ("it", "IT")])
         if model_name == "AllocationRule":
             return FakeQuery([])
         rows = [
@@ -122,8 +133,11 @@ class FakeDB:
 
 
 class TaggedFakeDB:
-    def query(self, _model):
-        model_name = getattr(_model, "__name__", "")
+    def query(self, *models):
+        first = models[0] if models else None
+        model_name = getattr(first, "__name__", "")
+        if not model_name and len(models) >= 2:
+            return FakeQuery([("finance", "Finance"), ("it", "IT")])
         if model_name == "AllocationRule":
             return FakeQuery([])
         rows = [

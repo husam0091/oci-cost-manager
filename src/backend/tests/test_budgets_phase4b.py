@@ -67,6 +67,8 @@ def test_budget_crud_and_schema_stability():
         "enabled",
         "notifications_enabled",
         "owner",
+        "start_date",
+        "end_date",
         "created_at",
         "updated_at",
     }

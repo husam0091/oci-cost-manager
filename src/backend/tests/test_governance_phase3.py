@@ -15,7 +15,7 @@ class _FakeCalc:
     def __init__(self):
         self.calls = 0
 
-    def get_costs_by_resource(self, start, end, include_skus=True):
+    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None, region=None):
         self.calls += 1
         if self.calls == 1:
             return [
