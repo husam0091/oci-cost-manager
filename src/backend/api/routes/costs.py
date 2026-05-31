@@ -525,7 +525,7 @@ async def get_costs_summary(
 
 @router.get("/breakdown", response_model=CostsBreakdownResponse, response_model_exclude_none=True)
 async def get_costs_breakdown(
-    group_by: Literal["service", "compartment", "region", "top_resources", "sku"] = Query("service"),
+    group_by: Literal["service", "compartment", "region", "top_resources", "sku", "env", "team", "app"] = Query("service"),
     start_date: str = Query(...),
     end_date: str = Query(...),
     compare: str = Query("previous"),
@@ -584,6 +584,11 @@ async def get_costs_breakdown(
             return (
                 calculator.get_top_resource_costs_raw(start, end_exclusive, region=region_filter, limit=raw_limit),
                 calculator.get_top_resource_costs_raw(prev_start, prev_end, region=region_filter, limit=raw_limit),
+            )
+        if group_by in {"env", "team", "app"}:
+            return (
+                calculator.get_costs_by_resource(start, end_exclusive, include_skus=False, region=region_filter),
+                calculator.get_costs_by_resource(prev_start, prev_end, include_skus=False, region=region_filter),
             )
         return (
             calculator.get_costs_by_service(start, end_exclusive, region=region_filter),
@@ -687,6 +692,21 @@ async def get_costs_breakdown(
             label = name_map.get(rid, rid[-24:])
             previous[label] = previous.get(label, 0.0) + float(r.get("total_cost") or 0)
 
+    mapping_health_payload: Optional[dict[str, float]] = None
+    if group_by in {"env", "team", "app"}:
+        cur_rows, prev_rows = current, previous
+        all_rids = list({r.get("resource_id") for r in cur_rows + prev_rows if r.get("resource_id")})
+        resources = db.query(Resource).filter(Resource.ocid.in_(all_rids)).all() if all_rids else []
+        resource_map = {r.ocid: r for r in resources}
+        rules = load_enabled_rules(db)
+        mapping_health = {"unowned_cost": 0.0, "low_confidence_cost": 0.0}
+        current = _aggregate_resource_rows(cur_rows, group_by, resource_map, rules=rules, mapping_health=mapping_health)
+        previous = _aggregate_resource_rows(prev_rows, group_by, resource_map, rules=rules, mapping_health={"unowned_cost": 0.0, "low_confidence_cost": 0.0})
+        mapping_health_payload = {
+            "unowned_cost": round(mapping_health["unowned_cost"], 2),
+            "low_confidence_cost": round(mapping_health["low_confidence_cost"], 2),
+        }
+
     items = _build_breakdown_items(current, previous, limit=limit, min_share_pct=min_share_pct)
     response = CostsBreakdownResponse(
         success=True,
@@ -702,7 +722,7 @@ async def get_costs_breakdown(
                 previous=round(float(sum(previous.values())), 2),
             ),
             items=items,
-            mapping_health=None,
+            mapping_health=mapping_health_payload,
         ),
     )
     set_cached(cache_key, response.model_dump(), AGG_CACHE_TTL)

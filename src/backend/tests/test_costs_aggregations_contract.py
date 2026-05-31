@@ -267,8 +267,12 @@ def test_movers_resource_metadata_fallback(monkeypatch):
         assert response.status_code == 200
         items = response.json()["data"]["items"]
         assert any(i["name"] == "vm-finance-01" and i["type"] == "compute.instance" for i in items)
-        # Second resource has no metadata in DB and should fall back to short OCID.
-        assert any(i["name"] == "bbbbbbbbbbbbbbbb" for i in items)
+        # Second resource has no metadata in DB and should fall back to a readable
+        # "<friendly_type> <short_id>" label derived from the OCID parts.
+        fallback = next((i for i in items if i["name"] != "vm-finance-01"), None)
+        assert fallback is not None
+        assert fallback["type"] == "instance"
+        assert "bbbbbbbb" in fallback["name"]
     finally:
         app.dependency_overrides.pop(costs.get_db, None)
 
