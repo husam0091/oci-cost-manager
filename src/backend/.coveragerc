@@ -1,0 +1,15 @@
+[run]
+branch = True
+source = .
+omit =
+    tests/*
+    alembic/*
+    scripts/*
+    */__pycache__/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    raise NotImplementedError
+    if __name__ == .__main__.:
+skip_empty = True

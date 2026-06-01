@@ -4,9 +4,23 @@ from fastapi.testclient import TestClient
 
 from main import app
 from api.routes import dashboard
+from services import budget_engine as _budget_engine
+from services import recommendations as _rec_service
 
 
 client = TestClient(app)
+
+
+def _patch_calculator(monkeypatch, factory):
+    """Patch all three modules that import get_cost_calculator at module scope.
+
+    ``dashboard.dashboard_summary`` itself calls ``get_cost_calculator``; it
+    also calls ``generate_recommendations`` and ``evaluate_budget_statuses``,
+    each of which has its own module-scoped binding.
+    """
+    monkeypatch.setattr(dashboard, "get_cost_calculator", factory)
+    monkeypatch.setattr(_rec_service, "get_cost_calculator", factory)
+    monkeypatch.setattr(_budget_engine, "get_cost_calculator", factory)
 
 
 class RecordingCalculator:
@@ -14,13 +28,13 @@ class RecordingCalculator:
         self.by_service_calls = []
         self.by_resource_calls = []
 
-    def get_costs_by_service(self, start, end):
+    def get_costs_by_service(self, start, end, region=None):
         self.by_service_calls.append((start, end))
         if len(self.by_service_calls) == 1:
             return {"Compute": 200.0, "Storage": 100.0}
         return {"Compute": 100.0, "Storage": 100.0}
 
-    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None):
+    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None, region=None):
         self.by_resource_calls.append((start, end, include_skus))
         if len(self.by_resource_calls) == 1:
             return [
@@ -50,18 +64,18 @@ class RecordingCalculator:
 
 
 class EmptyCalculator:
-    def get_costs_by_service(self, start, end):
+    def get_costs_by_service(self, start, end, region=None):
         return {}
 
-    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None):
+    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None, region=None):
         return []
 
 
 class SpotlightCalculator:
-    def get_costs_by_service(self, start, end):
+    def get_costs_by_service(self, start, end, region=None):
         return {"Compute": 300.0}
 
-    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None):
+    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None, region=None):
         if start.month == 1:
             return [
                 {"resource_id": "r-foo", "compartment_id": "foo", "total_cost": 120.0, "skus": [{"sku_name": "Compute VM", "cost": 120.0}]},
@@ -116,6 +130,8 @@ class _FakeResource:
         self.type = "compute.instance"
         self.name = ocid
         self.details = {}
+        self.status = "RUNNING"
+        self.shape = None
 
 
 class SpotlightDB:
@@ -135,7 +151,7 @@ class SpotlightDB:
 
 
 def test_core_business_spotlight_child_inclusion_and_totals(monkeypatch):
-    monkeypatch.setattr(dashboard, "get_cost_calculator", lambda: SpotlightCalculator())
+    _patch_calculator(monkeypatch, lambda: SpotlightCalculator())
     app.dependency_overrides[dashboard.get_db] = lambda: SpotlightDB()
     try:
         response = client.get("/api/v1/dashboard/summary?start_date=2026-01-01&end_date=2026-01-31")
@@ -155,7 +171,7 @@ def test_core_business_spotlight_child_inclusion_and_totals(monkeypatch):
 
 def test_dashboard_summary_previous_period_and_inclusive_end(monkeypatch):
     calc = RecordingCalculator()
-    monkeypatch.setattr(dashboard, "get_cost_calculator", lambda: calc)
+    _patch_calculator(monkeypatch, lambda: calc)
 
     response = client.get("/api/v1/dashboard/summary?start_date=2026-01-01&end_date=2026-01-31")
     assert response.status_code == 200
@@ -172,7 +188,7 @@ def test_dashboard_summary_previous_period_and_inclusive_end(monkeypatch):
 
 
 def test_dashboard_summary_delta_math(monkeypatch):
-    monkeypatch.setattr(dashboard, "get_cost_calculator", lambda: RecordingCalculator())
+    _patch_calculator(monkeypatch, lambda: RecordingCalculator())
     response = client.get("/api/v1/dashboard/summary?start_date=2026-01-01&end_date=2026-01-31")
     assert response.status_code == 200
     totals = response.json()["data"]["totals"]
@@ -183,7 +199,7 @@ def test_dashboard_summary_delta_math(monkeypatch):
 
 
 def test_dashboard_summary_empty_period_returns_zeroes(monkeypatch):
-    monkeypatch.setattr(dashboard, "get_cost_calculator", lambda: EmptyCalculator())
+    _patch_calculator(monkeypatch, lambda: EmptyCalculator())
     response = client.get("/api/v1/dashboard/summary?start_date=2026-01-01&end_date=2026-01-31")
     assert response.status_code == 200
     data = response.json()["data"]
@@ -195,7 +211,7 @@ def test_dashboard_summary_empty_period_returns_zeroes(monkeypatch):
 
 
 def test_dashboard_summary_schema_stability(monkeypatch):
-    monkeypatch.setattr(dashboard, "get_cost_calculator", lambda: RecordingCalculator())
+    _patch_calculator(monkeypatch, lambda: RecordingCalculator())
     response = client.get("/api/v1/dashboard/summary?start_date=2026-01-01&end_date=2026-01-31")
     assert response.status_code == 200
     payload = response.json()

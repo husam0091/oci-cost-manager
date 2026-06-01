@@ -65,17 +65,25 @@ jobs:
           ! rg -n "\"(oci_key_content|oci_key_file|oci_pass_phrase|oci_config_file)\"\\s*:" src/backend/api/routes
           ! rg -n "-----BEGIN|PRIVATE KEY" src/backend/api/routes src/frontend/src/services
 
-      - name: Run tests
+      - name: Run tests with coverage
         env:
           PYTHONPATH: src/backend
           DATABASE_URL: sqlite:///./test.db
           REDIS_URL: redis://localhost:6379/0
         run: |
           if [ -d tests ]; then
-            pytest -q
+            pytest -q --cov=. --cov-report=term --cov-report=xml:coverage.xml
           else
             echo "No tests directory found, skipping pytest."
           fi
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: src/backend/coverage.xml
+          if-no-files-found: ignore
 
   compose-build:
     runs-on: ubuntu-latest

@@ -271,6 +271,14 @@ def test_demo_mode_blocks_action_mutations():
 
 
 def test_ops_audit_export_generation(monkeypatch, tmp_path):
+    class _StubCalc:
+        def get_costs_by_service(self, start, end, region=None):
+            return {}
+
+        def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None, region=None):
+            return []
+
+    monkeypatch.setattr(admin_route, "get_cost_calculator", lambda: _StubCalc(), raising=False)
     monkeypatch.setattr(admin_route, "get_app_settings", lambda: type("C", (), {"export_dir": str(tmp_path), "app_version": "1.0.0", "app_name": "OCI Cost Manager"})())
     app.dependency_overrides[admin_route._require_admin] = lambda: {"sub": "admin"}
     try:

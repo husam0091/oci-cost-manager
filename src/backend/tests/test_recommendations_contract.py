@@ -9,7 +9,7 @@ client = TestClient(app)
 
 
 class FakeCalcRecommendations:
-    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None):
+    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None, region=None):
         if start.month == 1:
             return [
                 {
@@ -187,7 +187,7 @@ def test_recommendation_resource_details(monkeypatch):
 
 def test_recommendations_empty_range(monkeypatch):
     class EmptyCalc:
-        def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None):
+        def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None, region=None):
             return []
 
     monkeypatch.setattr(rec_service, "get_cost_calculator", lambda: EmptyCalc())

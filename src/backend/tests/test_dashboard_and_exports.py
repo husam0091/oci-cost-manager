@@ -6,16 +6,26 @@ from fastapi.testclient import TestClient
 
 from main import app
 from api.routes import admin, dashboard
+from services import budget_engine as _budget_engine
+from services import recommendations as _rec_service
 
 
 client = TestClient(app)
 
 
+def _patch_calculator(monkeypatch, factory):
+    """Patch get_cost_calculator on every module that has its own binding."""
+    monkeypatch.setattr(dashboard, "get_cost_calculator", factory)
+    monkeypatch.setattr(_rec_service, "get_cost_calculator", factory)
+    monkeypatch.setattr(_budget_engine, "get_cost_calculator", factory)
+    monkeypatch.setattr(admin, "get_cost_calculator", factory, raising=False)
+
+
 class FakeCalculator:
-    def get_costs_by_service(self, start, end):
+    def get_costs_by_service(self, start, end, region=None):
         return {"Compute": 100.0, "Storage": 50.0}
 
-    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None):
+    def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None, region=None):
         return [
             {
                 "resource_id": "ocid1.instance.oc1..demo",
@@ -35,7 +45,7 @@ class FakeCalculator:
 
 
 def test_dashboard_summary_end_date_is_inclusive(monkeypatch):
-    monkeypatch.setattr(dashboard, "get_cost_calculator", lambda: FakeCalculator())
+    _patch_calculator(monkeypatch, lambda: FakeCalculator())
     response = client.get("/api/v1/dashboard/summary?start_date=2026-01-01&end_date=2026-01-31")
     assert response.status_code == 200
     payload = response.json()["data"]
@@ -151,10 +161,10 @@ def test_inventory_summary_report_generates_non_negative_totals(monkeypatch, tmp
 
 def test_export_generate_empty_range_contains_warning(monkeypatch, tmp_path: Path):
     class EmptyCalculator:
-        def get_costs_by_service(self, start, end):
+        def get_costs_by_service(self, start, end, region=None):
             return {}
 
-        def get_costs_by_resource(self, start, end, include_skus=True):
+        def get_costs_by_resource(self, start, end, include_skus=True, compartment_id=None, region=None):
             return []
 
     monkeypatch.setattr(admin, "get_cost_calculator", lambda: EmptyCalculator())
@@ -179,7 +189,7 @@ def test_export_generate_empty_range_contains_warning(monkeypatch, tmp_path: Pat
 
 
 def test_export_generate_optimization_recommendations(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(admin, "get_cost_calculator", lambda: FakeCalculator())
+    _patch_calculator(monkeypatch, lambda: FakeCalculator())
     monkeypatch.setattr(admin, "get_app_settings", lambda: SimpleNamespace(export_dir=str(tmp_path), app_version="1.0.0", app_name="OCI Cost Manager"))
     app.dependency_overrides[admin._require_admin] = lambda: {"sub": "tester"}
     try:
@@ -205,7 +215,7 @@ def test_export_generate_optimization_recommendations(monkeypatch, tmp_path: Pat
 
 
 def test_export_generate_budget_health(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(admin, "get_cost_calculator", lambda: FakeCalculator())
+    _patch_calculator(monkeypatch, lambda: FakeCalculator())
     monkeypatch.setattr(admin, "get_app_settings", lambda: SimpleNamespace(export_dir=str(tmp_path), app_version="1.0.0", app_name="OCI Cost Manager"))
     app.dependency_overrides[admin._require_admin] = lambda: {"sub": "tester"}
     try:

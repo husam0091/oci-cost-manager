@@ -103,7 +103,7 @@ def test_costs_endpoint_uses_cached_payload_when_available(monkeypatch):
 
 def test_costs_endpoint_computes_and_caches_when_cache_miss(monkeypatch):
     class FakeCalculator:
-        def get_costs_by_service(self, start, end):
+        def get_costs_by_service(self, start, end, region=None):
             return {"Compute": 50.0, "Storage": 25.0}
 
     captured = {}
