@@ -159,7 +159,7 @@ def _production_blocked_field(payload: BaseModel) -> Optional[str]:
 
 
 @router.post("/login")
-async def login(req: LoginRequest, resp: Response, db: Session = Depends(get_db)):
+def login(req: LoginRequest, resp: Response, db: Session = Depends(get_db)):
     username = (req.username or "").strip()
     user = db.query(UserAccount).filter(UserAccount.username == username, UserAccount.is_active == True).one_or_none()
     if user and verify_password(req.password, user.password_hash):
@@ -202,13 +202,13 @@ async def login(req: LoginRequest, resp: Response, db: Session = Depends(get_db)
 
 
 @router.post("/logout")
-async def logout(resp: Response):
+def logout(resp: Response):
     resp.delete_cookie("access_token")
     return {"success": True}
 
 
 @router.get("/settings")
-async def get_settings(db: Session = Depends(get_db), user=Depends(_require_admin)):
+def get_settings(db: Session = Depends(get_db), user=Depends(_require_admin)):
     ensure_settings_schema()
     s = db.query(Setting).filter(Setting.id == 1).one()
     return {
@@ -248,7 +248,7 @@ async def get_settings(db: Session = Depends(get_db), user=Depends(_require_admi
 
 
 @router.put("/settings")
-async def update_settings(req: SettingsUpdate, request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def update_settings(req: SettingsUpdate, request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
     ensure_settings_schema()
     blocked = _production_blocked_field(req)
     if blocked:
@@ -370,13 +370,13 @@ async def update_settings(req: SettingsUpdate, request: Request, db: Session = D
 
 
 @router.get("/settings/feature-flags")
-async def get_feature_flags(db: Session = Depends(get_db), user=Depends(_require_admin)):
+def get_feature_flags(db: Session = Depends(get_db), user=Depends(_require_admin)):
     s = db.query(Setting).filter(Setting.id == 1).one_or_none()
     return {"success": True, "data": feature_flags(s)}
 
 
 @router.post("/settings/feature-flags")
-async def update_feature_flags(payload: dict[str, Any], db: Session = Depends(get_db), user=Depends(_require_admin)):
+def update_feature_flags(payload: dict[str, Any], db: Session = Depends(get_db), user=Depends(_require_admin)):
     s = db.query(Setting).filter(Setting.id == 1).one()
     if "enable_oci_executors" in payload:
         s.enable_oci_executors = bool(payload.get("enable_oci_executors"))
@@ -391,7 +391,7 @@ async def update_feature_flags(payload: dict[str, Any], db: Session = Depends(ge
 
 
 @router.get("/settings/important-compartments")
-async def get_important_compartments(db: Session = Depends(get_db), user=Depends(_require_admin)):
+def get_important_compartments(db: Session = Depends(get_db), user=Depends(_require_admin)):
     s = db.query(Setting).filter(Setting.id == 1).one()
     ids = list(getattr(s, "important_compartments", None) or getattr(s, "important_compartment_ids", None) or [])
     include_children = bool(getattr(s, "important_include_children", True))
@@ -408,7 +408,7 @@ async def get_important_compartments(db: Session = Depends(get_db), user=Depends
 
 
 @router.post("/settings/important-compartments")
-async def set_important_compartments(
+def set_important_compartments(
     req: ImportantCompartmentsUpdate,
     db: Session = Depends(get_db),
     user=Depends(_require_admin),
@@ -428,7 +428,7 @@ async def set_important_compartments(
 
 
 @router.post("/settings/test-oci")
-async def test_settings_oci(req: OciConnectionTestRequest, request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def test_settings_oci(req: OciConnectionTestRequest, request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
     blocked = _production_blocked_field(req)
     if blocked:
         raise_production_block(blocked, getattr(request.state, "correlation_id", None))
@@ -472,27 +472,13 @@ async def test_settings_oci(req: OciConnectionTestRequest, request: Request, db:
 
 
 @router.post("/scan/run")
-async def scan_now(db: Session = Depends(get_db), user=Depends(_require_admin)):
-    _mark_stale_scan_runs(db)
-
-    running = db.query(ScanRun).filter(ScanRun.status == "running").order_by(ScanRun.id.desc()).first()
-    if running:
-        return {"success": True, "data": {"status": "already_running", "run_id": running.id}}
-
-    def _run_scan_in_background():
-        local_db = SessionLocal()
-        try:
-            run_full_scan(local_db)
-        finally:
-            local_db.close()
-
-    t = threading.Thread(target=_run_scan_in_background, daemon=True)
-    t.start()
-    return {"success": True, "data": {"status": "started"}}
+def scan_now(db: Session = Depends(get_db), user=Depends(_require_admin)):
+    from services.scan_lifecycle import start_inventory_scan
+    return {"success": True, "data": start_inventory_scan()}
 
 
 @router.get("/scan/runs")
-async def list_runs(db: Session = Depends(get_db), user=Depends(_require_admin)):
+def list_runs(db: Session = Depends(get_db), user=Depends(_require_admin)):
     _mark_stale_scan_runs(db)
     runs = db.query(ScanRun).order_by(ScanRun.id.desc()).limit(20).all()
     out = [{
@@ -503,19 +489,12 @@ async def list_runs(db: Session = Depends(get_db), user=Depends(_require_admin))
 
 
 def _mark_stale_scan_runs(db: Session) -> None:
-    """Mark orphaned long-running scans as failed to avoid indefinite UI scanning."""
-    stale_cutoff = datetime.now(UTC) - timedelta(minutes=30)
-    stale_runs = db.query(ScanRun).filter(ScanRun.status == "running", ScanRun.started_at < stale_cutoff).all()
-    for run in stale_runs:
-        run.status = "failed"
-        run.finished_at = datetime.now(UTC)
-        run.error_message = "Marked stale after 30m timeout"
-    if stale_runs:
-        db.commit()
+    from services.scan_lifecycle import recover_orphaned_scans
+    recover_orphaned_scans(db)
 
 
 @router.post("/exports/snapshot")
-async def export_snapshot(req: ExportSnapshotRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def export_snapshot(req: ExportSnapshotRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
     s = db.query(Setting).filter(Setting.id == 1).one()
     now = datetime.now(UTC)
     counts = db.query(Resource.type, func.count(Resource.id)).group_by(Resource.type).all()
@@ -631,7 +610,7 @@ async def export_snapshot(req: ExportSnapshotRequest, db: Session = Depends(get_
 
 
 @router.get("/exports/list")
-async def list_exports(user=Depends(_require_admin)):
+def list_exports(user=Depends(_require_admin)):
     cfg = get_app_settings()
     export_dir = Path(cfg.export_dir)
     export_dir.mkdir(parents=True, exist_ok=True)
@@ -669,7 +648,7 @@ async def list_exports(user=Depends(_require_admin)):
 
 
 @router.get("/exports/download/{name}")
-async def download_export(name: str, user=Depends(_require_admin)):
+def download_export(name: str, user=Depends(_require_admin)):
     if "/" in name or "\\" in name or ".." in name:
         raise HTTPException(status_code=400, detail="Invalid file name")
     cfg = get_app_settings()
@@ -1987,7 +1966,7 @@ def _write_catalog_xlsx(path: Path, payload: dict) -> None:
 
 
 @router.post("/exports/generate")
-async def generate_report(req: ExportGenerateRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def generate_report(req: ExportGenerateRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
     catalog = _report_catalog()
     report_type = _normalize_report_type(req.report_type)
     if report_type not in catalog:
@@ -2039,7 +2018,7 @@ async def generate_report(req: ExportGenerateRequest, db: Session = Depends(get_
 
 
 @router.get("/users")
-async def list_users(db: Session = Depends(get_db), user=Depends(_require_admin)):
+def list_users(db: Session = Depends(get_db), user=Depends(_require_admin)):
     rows = db.query(UserAccount).order_by(UserAccount.username.asc()).all()
     return {
         "success": True,
@@ -2062,7 +2041,7 @@ async def list_users(db: Session = Depends(get_db), user=Depends(_require_admin)
 
 
 @router.post("/users")
-async def create_user(req: UserCreateRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def create_user(req: UserCreateRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
     username = (req.username or "").strip()
     if not username:
         raise HTTPException(status_code=400, detail="username is required")
@@ -2088,7 +2067,7 @@ async def create_user(req: UserCreateRequest, db: Session = Depends(get_db), use
 
 
 @router.put("/users/{user_id}")
-async def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depends(get_db), user=Depends(_require_admin)):
     row = db.query(UserAccount).filter(UserAccount.id == user_id).one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="user not found")
@@ -2118,7 +2097,7 @@ async def update_user(user_id: int, req: UserUpdateRequest, db: Session = Depend
 
 
 @router.delete("/users/{user_id}")
-async def delete_user(user_id: int, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def delete_user(user_id: int, db: Session = Depends(get_db), user=Depends(_require_admin)):
     row = db.query(UserAccount).filter(UserAccount.id == user_id).one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="user not found")
@@ -2132,7 +2111,7 @@ async def delete_user(user_id: int, db: Session = Depends(get_db), user=Depends(
 
 
 @router.get("/regions")
-async def get_regions(db: Session = Depends(get_db), user=Depends(_require_admin)):
+def get_regions(db: Session = Depends(get_db), user=Depends(_require_admin)):
     s = db.query(Setting).filter(Setting.id == 1).one_or_none()
     primary = (s.oci_region if s else None) or ""
     extra = list(s.oci_enabled_regions or []) if s else []
@@ -2140,7 +2119,7 @@ async def get_regions(db: Session = Depends(get_db), user=Depends(_require_admin
 
 
 @router.put("/regions")
-async def update_regions(payload: dict, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def update_regions(payload: dict, db: Session = Depends(get_db), user=Depends(_require_admin)):
     s = db.query(Setting).filter(Setting.id == 1).one_or_none()
     if not s:
         raise HTTPException(status_code=500, detail="Settings row missing")

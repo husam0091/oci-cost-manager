@@ -90,7 +90,7 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ./deploy/.env.production
-    command: ["bash", "-lc", "celery -A worker.celery_app worker -Q default,heavy -l INFO"]
+    command: ["bash", "-lc", "celery -A worker.celery_app worker -Q default,heavy -l INFO --concurrency=${CELERY_WORKER_CONCURRENCY:-2}"]
     environment:
       DATABASE_URL: "postgresql+psycopg://ocicost_user:${POSTGRES_PASSWORD:-change_me_strong}@pgbouncer:5432/ocicost"
       REDIS_URL: "redis://redis:6379/0"

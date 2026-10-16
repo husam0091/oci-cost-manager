@@ -10,6 +10,8 @@ from services import get_oci_client
 
 router = APIRouter()
 
+_OCI_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="oci-read")
+
 # Cache TTL: 1 hour for resource data
 RESOURCE_CACHE_TTL = 3600
 
@@ -162,34 +164,34 @@ async def list_resources(
 
     try:
         loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor() as executor:
-            try:
-                # If a specific compartment is selected, allow longer even without refresh
-                timeout_sec = 120.0 if refresh else (30.0 if compartment_id else 10.0)
-                items = await asyncio.wait_for(
-                    loop.run_in_executor(executor, fetch_all),
-                    timeout=timeout_sec,
-                )
-            except asyncio.TimeoutError:
-                # Prefer a full cache if available, otherwise quick
-                cached_full = get_cached(alt_full_key)
-                if cached_full:
-                    return {
-                        "success": True,
-                        "data": cached_full[:limit],
-                        "cached": True,
-                        "meta": {"total": len(cached_full), "returned": min(limit, len(cached_full)), "warning": "Timeout - showing cached full", "mode": "full"},
-                    }
-                cached_quick = get_cached(alt_quick_key)
-                if cached_quick:
-                    return {
-                        "success": True,
-                        "data": cached_quick[:limit],
-                        "cached": True,
-                        "meta": {"total": len(cached_quick), "returned": min(limit, len(cached_quick)), "warning": "Timeout - showing cached quick", "mode": "quick"},
-                    }
-                # Timed out and no cache – return empty quickly
-                return {"success": True, "data": [], "cached": False, "meta": {"total": 0, "returned": 0, "warning": "Timeout", "mode": "full" if not quick else "quick"}}
+        executor = _OCI_EXECUTOR
+        try:
+            # If a specific compartment is selected, allow longer even without refresh
+            timeout_sec = 120.0 if refresh else (30.0 if compartment_id else 10.0)
+            items = await asyncio.wait_for(
+                loop.run_in_executor(executor, fetch_all),
+                timeout=timeout_sec,
+            )
+        except asyncio.TimeoutError:
+            # Prefer a full cache if available, otherwise quick
+            cached_full = get_cached(alt_full_key)
+            if cached_full:
+                return {
+                    "success": True,
+                    "data": cached_full[:limit],
+                    "cached": True,
+                    "meta": {"total": len(cached_full), "returned": min(limit, len(cached_full)), "warning": "Timeout - showing cached full", "mode": "full"},
+                }
+            cached_quick = get_cached(alt_quick_key)
+            if cached_quick:
+                return {
+                    "success": True,
+                    "data": cached_quick[:limit],
+                    "cached": True,
+                    "meta": {"total": len(cached_quick), "returned": min(limit, len(cached_quick)), "warning": "Timeout - showing cached quick", "mode": "quick"},
+                }
+            # Timed out and no cache – return empty quickly
+            return {"success": True, "data": [], "cached": False, "meta": {"total": 0, "returned": 0, "warning": "Timeout", "mode": "full" if not quick else "quick"}}
 
         # Cache full/partial results
         if items:
@@ -263,24 +265,24 @@ async def get_resources_summary(
     try:
         # Run in thread pool with timeout
         loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor() as executor:
-            try:
-                timeout_sec = 120.0 if refresh else 10.0
-                summary = await asyncio.wait_for(
-                    loop.run_in_executor(executor, fetch_summary),
-                    timeout=timeout_sec
-                )
-            except asyncio.TimeoutError:
-                # Return cached even if expired
-                cached = get_cached(cache_key)
-                if cached:
-                    return {
-                        "success": True,
-                        "data": cached,
-                        "cached": True,
-                        "warning": "API timeout - showing cached data",
-                    }
-                summary = {"oracle_db": 0, "mysql": 0, "sql_server": 0, "total": 0, "error": "Request timed out"}
+        executor = _OCI_EXECUTOR
+        try:
+            timeout_sec = 120.0 if refresh else 10.0
+            summary = await asyncio.wait_for(
+                loop.run_in_executor(executor, fetch_summary),
+                timeout=timeout_sec
+            )
+        except asyncio.TimeoutError:
+            # Return cached even if expired
+            cached = get_cached(cache_key)
+            if cached:
+                return {
+                    "success": True,
+                    "data": cached,
+                    "cached": True,
+                    "warning": "API timeout - showing cached data",
+                }
+            summary = {"oracle_db": 0, "mysql": 0, "sql_server": 0, "total": 0, "error": "Request timed out"}
         
         # Cache the result
         set_cached(cache_key, summary, RESOURCE_CACHE_TTL)
@@ -303,7 +305,7 @@ async def get_resources_summary(
 
 
 @router.get("/{resource_id}")
-async def get_resource(resource_id: str):
+def get_resource(resource_id: str):
     """Get details for a specific resource."""
     try:
         oci_client = get_oci_client()

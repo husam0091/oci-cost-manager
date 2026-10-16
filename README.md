@@ -430,3 +430,9 @@ Please follow the existing code style — `black` + `ruff` for Python, ESLint fo
 Built for OCI FinOps teams who need cost visibility beyond the native console.
 
 </div>
+
+### Runtime reliability and architecture
+
+See [Interface 2.2 runtime guide](docs/runtime-reliability-2.2.md) for scan recovery,
+compartment checkpoints, cache/payload fixes, deployment checks, and the recommended
+migration to durable inventory jobs and database-backed billing ingestion.

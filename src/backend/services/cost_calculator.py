@@ -1,5 +1,7 @@
 """Cost calculation service using OCI Usage API."""
 
+import os
+from collections import OrderedDict
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -15,22 +17,34 @@ from .oci_client import get_oci_client
 _oci_usage_semaphore = threading.Semaphore(1)
 
 # Simple in-memory cache
-_cache = {}
+_cache = OrderedDict()
+_cache_lock = threading.Lock()
+_cache_max_entries = max(1, int(os.getenv("COST_MEMORY_CACHE_MAX_ENTRIES", "128")))
 _cache_ttl = 600  # 10 minutes
 
 
+def _evict_expired(now):
+    for key in list(_cache):
+        if now - _cache[key][1] >= _cache_ttl:
+            del _cache[key]
+
+
 def get_cached(key: str):
-    """Get cached value if not expired."""
-    if key in _cache:
-        value, timestamp = _cache[key]
-        if time.time() - timestamp < _cache_ttl:
-            return value
-    return None
+    with _cache_lock:
+        _evict_expired(time.time())
+        if key not in _cache:
+            return None
+        _cache.move_to_end(key)
+        return _cache[key][0]
 
 
 def set_cached(key: str, value: Any):
-    """Set cached value with timestamp."""
-    _cache[key] = (value, time.time())
+    with _cache_lock:
+        _evict_expired(time.time())
+        _cache[key] = (value, time.time())
+        _cache.move_to_end(key)
+        while len(_cache) > _cache_max_entries:
+            _cache.popitem(last=False)
 
 
 class CostCalculatorService:

@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.get("")
-async def list_prices(
+def list_prices(
     service: Optional[str] = Query(None, description="Filter by service: Database, MySQL, Compute"),
     region: Optional[str] = Query(None, description="Filter by region"),
 ):
@@ -44,7 +44,7 @@ async def list_prices(
 
 
 @router.get("/databases")
-async def get_database_prices(
+def get_database_prices(
     region: Optional[str] = Query(None, description="Filter by region"),
 ):
     """Get prices for all database services."""
@@ -71,7 +71,7 @@ async def get_database_prices(
 
 
 @router.get("/sku/{sku_part_number}")
-async def get_price_by_sku(
+def get_price_by_sku(
     sku_part_number: str,
     region: Optional[str] = Query(None, description="Filter by region"),
 ):
@@ -94,7 +94,7 @@ async def get_price_by_sku(
 
 
 @router.post("/refresh")
-async def refresh_prices():
+def refresh_prices():
     """Refresh prices from OCI Price List API."""
     try:
         updater = get_price_updater()
@@ -113,7 +113,7 @@ async def refresh_prices():
 
 
 @router.get("/services")
-async def list_services():
+def list_services():
     """List available OCI services with pricing."""
     try:
         updater = get_price_updater()
@@ -136,7 +136,7 @@ async def list_services():
 
 
 @router.get("/regions")
-async def list_regions():
+def list_regions():
     """List available regions with pricing."""
     try:
         updater = get_price_updater()

@@ -14,7 +14,7 @@ _CACHE_TTL = 900  # 15-minute cache for cost data
 
 
 @router.get("")
-async def get_subscriptions():
+def get_subscriptions():
     """Return Universal Credit consumption data from the OCI Usage API.
 
     Consumed YTD/MTD = OCI Usage API computed_amount (same as Cost Analysis).

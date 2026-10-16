@@ -9,7 +9,7 @@ router = APIRouter()
 
 
 @router.get("")
-async def list_compartments(
+def list_compartments(
     parent_id: Optional[str] = Query(None, description="Parent compartment OCID"),
 ):
     """List all compartments.
@@ -42,7 +42,7 @@ async def list_compartments(
 
 
 @router.get("/tree")
-async def get_compartment_tree():
+def get_compartment_tree():
     """Get compartments as a hierarchical tree structure."""
     try:
         oci_client = get_oci_client()
@@ -85,7 +85,7 @@ async def get_compartment_tree():
 
 
 @router.get("/{compartment_id}")
-async def get_compartment(compartment_id: str):
+def get_compartment(compartment_id: str):
     """Get details for a specific compartment."""
     try:
         oci_client = get_oci_client()
@@ -109,7 +109,7 @@ async def get_compartment(compartment_id: str):
 
 
 @router.post("/refresh")
-async def refresh_compartments():
+def refresh_compartments():
     """Refresh compartments from OCI."""
     try:
         oci_client = get_oci_client()

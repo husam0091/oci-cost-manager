@@ -46,7 +46,7 @@ async def liveness_check():
 
 
 @router.get("/health/ready")
-async def readiness_check():
+def readiness_check():
     """Readiness check requiring schema ensure + writable DB."""
     try:
         init_db()
@@ -59,7 +59,7 @@ async def readiness_check():
 
 
 @router.get("/health/oci")
-async def oci_health_check():
+def oci_health_check():
     """Check OCI connection health."""
     try:
         oci_client = get_oci_client()

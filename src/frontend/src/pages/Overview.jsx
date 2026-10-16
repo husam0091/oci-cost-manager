@@ -35,6 +35,7 @@ export default function Overview({
       end_date: range.end,
       region: activeRegion,
       limit: 1,
+      view: 'overview',
       refresh: refresh > 0
     }).then(response => {
       if (!cancelled) setReport(response.data);
@@ -71,7 +72,7 @@ export default function Overview({
     icon: ArrowDownRight
   }, {
     label: 'Resources billed',
-    value: report ? resources.filter(r => r.resource_id).length.toLocaleString() : '—',
+    value: report ? (report.data.resource_counts?.[code] || 0).toLocaleString() : '—',
     note: 'In this period, region and currency',
     icon: ShieldCheck
   }];

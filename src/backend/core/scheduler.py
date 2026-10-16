@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from core.database import SessionLocal
 from core.models import Setting, UserAccount
 from services.scanner import run_full_scan
+from services.log_retention import retention_job
 
 _scheduler: BackgroundScheduler | None = None
 
@@ -75,3 +76,4 @@ def start_scheduler():
     if not sched.running:
         sched.start()
     schedule_scan()
+    sched.add_job(retention_job, trigger=IntervalTrigger(hours=24), id="log_retention", replace_existing=True, max_instances=1)

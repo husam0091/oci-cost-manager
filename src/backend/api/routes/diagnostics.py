@@ -23,7 +23,7 @@ class DiagnosticsJobRequest(BaseModel):
 
 
 @router.get("")
-async def get_diagnostics(request: Request, db: Session = Depends(get_db)):
+def get_diagnostics(request: Request, db: Session = Depends(get_db)):
     data, source = get_diagnostics_response(db)
     corr = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     log_event(level="info", log_type="backend", source="api", message="diagnostics_read", correlation_id=corr, details={"source": source, "status": data.get("status")})
@@ -31,7 +31,7 @@ async def get_diagnostics(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", status_code=status.HTTP_202_ACCEPTED)
-async def refresh_diagnostics(body: DiagnosticsJobRequest, request: Request, db: Session = Depends(get_db)):
+def refresh_diagnostics(body: DiagnosticsJobRequest, request: Request, db: Session = Depends(get_db)):
     corr = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     params = {**(body.params or {}), "correlation_id": corr}
     job = JobRun(

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Database, Server, HardDrive, RefreshCw, Monitor, Folder, Archive, Shield, Package, Save, Search } from 'lucide-react';
-import { getDataResources, getDataCompartmentTree, adminRunScan, getCostsByResource } from '../services/api';
+import { getDataResources, getDataResourceCounts, getDataCompartmentTree, adminRunScan, getCostsByResource } from '../services/api';
+import { toIsoDate } from '../utils/dateRanges';
 import { UI_COPY } from '../constants/copy';
 
 const typeConfig = {
@@ -55,74 +56,6 @@ function resourceNameFromCostRow(row) {
   return `Resource ${short}`;
 }
 
-function detectLicense(resource) {
-  const d = resource.details || {};
-  const img = (d.image_name || '').toLowerCase();
-  const rtype = (resource.type || '').toLowerCase();
-  const ocpus = d.cpu_core_count ?? d.ocpus ?? 2;
-
-  if (img.includes('bigip') || img.includes('big-ip')) {
-    return { vendor: 'F5', product: 'BIG-IP', costPerMonth: Math.round((ocpus || 4) * 250) };
-  }
-  if (img.includes('panorama')) {
-    return { vendor: 'Palo Alto', product: 'Panorama', costPerMonth: Math.round((ocpus || 4) * 200) };
-  }
-  if (img.includes('vm-series') || img.includes('vmseries')) {
-    return { vendor: 'Palo Alto', product: 'VM-Series', costPerMonth: Math.round((ocpus || 4) * 300) };
-  }
-  if (img.includes('fortiproxy')) {
-    const m = img.match(/(\d+)\s*ocpu/) || img.match(/payg[_-]?(\d+)/);
-    const licOcpus = m ? parseInt(m[1], 10) : (ocpus || 4);
-    return { vendor: 'Fortinet', product: `FortiProxy PAYG ${licOcpus} OCPU`, costPerMonth: Math.round(licOcpus * 180) };
-  }
-  if (img.includes('fortimanager')) {
-    return { vendor: 'Fortinet', product: 'FortiManager', costPerMonth: 500 };
-  }
-  if (img.includes('fortianalyzer')) {
-    return { vendor: 'Fortinet', product: 'FortiAnalyzer', costPerMonth: 400 };
-  }
-  if (img.includes('forti')) {
-    const m = img.match(/(\d+)\s*ocpu/) || img.match(/payg[_-]?(\d+)/);
-    const licOcpus = m ? parseInt(m[1], 10) : (ocpus || 4);
-    return { vendor: 'Fortinet', product: `FortiGate PAYG ${licOcpus} OCPU`, costPerMonth: Math.round(licOcpus * 280) };
-  }
-  if (img.includes('sql') && (img.includes('-ent') || img.includes('enterprise'))) {
-    return { vendor: 'Microsoft', product: 'SQL Server Enterprise', costPerMonth: Math.round((ocpus || 4) * 360) };
-  }
-  if (img.includes('sql') || rtype === 'sql_server') {
-    return { vendor: 'Microsoft', product: 'SQL Server Standard', costPerMonth: Math.round((ocpus || 4) * 108) };
-  }
-  if (img.includes('windows') || rtype === 'windows_server') {
-    return { vendor: 'Microsoft', product: 'Windows Server', costPerMonth: Math.round((ocpus || 2) * 22) };
-  }
-  return null;
-}
-
-// Estimates cost for resource types that have no OCI cost data in aggregates
-function estimateMissingCost(resource) {
-  const rtype = (resource.type || '').toLowerCase();
-  const d = resource.details || {};
-  const shape = (resource.shape || '');
-
-  if (rtype === 'mysql') {
-    // Parse OCPU count from shape: "MySQL.64" → 64, "MySQL.VM.Standard.E3.8.64GB" → 8
-    const m = shape.match(/^MySQL\.(\d+)$/i) || shape.match(/\.(\d+)\.\d+GB/i);
-    const ocpus = m ? parseInt(m[1], 10) : 4;
-    let cost = Math.round(ocpus * 84); // ~$84/OCPU/month
-    if (d.is_heat_wave_cluster_attached) cost += 2200; // ~$2,200/HeatWave node
-    const label = d.is_heat_wave_cluster_attached ? `MySQL HeatWave (${ocpus} OCPU)` : `MySQL (${ocpus} OCPU)`;
-    return { vendor: 'OCI', product: label, costPerMonth: cost };
-  }
-
-  if (rtype === 'boot_volume_backup' || rtype === 'volume_backup') {
-    const gb = d.size_in_gbs || 0;
-    if (!gb) return null;
-    return { vendor: 'OCI', product: `Backup Storage (${gb} GB)`, costPerMonth: Math.round(gb * 0.026) };
-  }
-
-  return null;
-}
-
 function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
   const config = typeConfig[resource.type] || { icon: HardDrive, color: 'bg-gray-100', label: resource.type };
   const Icon = config.icon;
@@ -131,18 +64,8 @@ function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
     : (resource.name?.trim() || 'Unnamed resource');
 
   const d = resource.details || {};
-  const ociCost = monthlyCostProp != null && monthlyCostProp > 0 ? monthlyCostProp
-    : (d.monthly_cost ?? d.total_cost_estimate ?? null);
-  const license = detectLicense(resource);
-  const licenseCost = license?.costPerMonth ?? null;
-  // For types where OCI aggregates return $0, fall back to estimation
-  const missingEst = (ociCost == null || ociCost === 0) && licenseCost == null
-    ? estimateMissingCost(resource)
-    : null;
-  const missingCost = missingEst?.costPerMonth ?? null;
-  const monthlyCost = ociCost != null || licenseCost != null || missingCost != null
-    ? (ociCost ?? 0) + (licenseCost ?? 0) + (missingCost ?? 0)
-    : null;
+  // Only use the reported cost for this selected period; never add guessed licenses.
+  const monthlyCost = monthlyCostProp ?? null;
   const storageGb = d.size_in_gbs ?? d.data_storage_size_in_gbs ?? null;
   const ocpus = d.cpu_core_count ?? d.ocpus ?? null;
   const isHealthy = ['AVAILABLE', 'RUNNING', 'ACTIVE'].includes(resource.status);
@@ -167,33 +90,13 @@ function ResourceCard({ resource, monthlyCost: monthlyCostProp }) {
         </span>
       </div>
 
-      {/* Monthly cost — prominent row */}
-      {monthlyCost != null && (
-        <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-700/50">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500">Est. Monthly Cost</span>
-            <span className="text-sm font-bold text-slate-800">${monthlyCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-          </div>
-          {ociCost != null && ociCost > 0 && licenseCost != null && (
-            <div className="mt-1 flex items-center justify-between">
-              <span className="text-[11px] text-slate-400">OCI compute</span>
-              <span className="text-xs text-slate-500">${ociCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-            </div>
-          )}
-          {licenseCost != null && (
-            <div className={`flex items-center justify-between ${ociCost != null && ociCost > 0 ? '' : 'mt-1'}`}>
-              <span className="text-[11px] text-slate-400">{license.vendor} {license.product}</span>
-              <span className="text-xs text-slate-500">~${licenseCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-            </div>
-          )}
-          {missingCost != null && (
-            <div className="mt-1 flex items-center justify-between">
-              <span className="text-[11px] text-slate-400">{missingEst.vendor} {missingEst.product}</span>
-              <span className="text-xs text-amber-600">~${missingCost.toLocaleString(undefined, { maximumFractionDigits: 0 })} est.</span>
-            </div>
-          )}
+      <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-700/50">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-slate-500">OCI cost · selected period</span>
+          <span className="text-sm font-bold text-slate-800">{monthlyCost == null ? 'Not available' : `$${monthlyCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}</span>
         </div>
-      )}
+        <p className="mt-1 text-[10px] text-slate-500">No additional license estimate is added. Open Spend explorer for billing currency and license details.</p>
+      </div>
 
       {/* Key specs grid */}
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
@@ -350,20 +253,45 @@ function Resources({ activeRegion = 'all' }) {
   const [refreshing, setRefreshing] = useState(false);
   const [compartments, setCompartments] = useState([]);
   const [compartmentId, setCompartmentId] = useState('');
-  const [counts, setCounts] = useState({ all: 0 });
+  const [inventoryCounts, setCounts] = useState({ all: 0 });
   const [period, setPeriod] = useState('monthly');
-  const [filterCost, setFilterCost] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [costMap, setCostMap] = useState({});
+  const [costRows, setCostRows] = useState([]);
+  const [costError, setCostError] = useState(false);
+  const [costLoading, setCostLoading] = useState(false);
+  const [scanNotice, setScanNotice] = useState('');
+  const costMap = useMemo(() => Object.fromEntries(costRows.map(row => [row.resource_id, row.total_cost])), [costRows]);
+  const costText = row => row.sku_text || (row.skus || []).map(s => s.sku_name || '').join(' ');
+  const counts = useMemo(() => {
+    const out = { ...inventoryCounts };
+    const derived = {};
+    for (const row of costRows) {
+      const type = detectTypeFromSkuText(costText(row).toLowerCase());
+      if (type) (derived[type] ||= new Set()).add(row.resource_id);
+    }
+    for (const type of COST_TYPE_KEYS) if (!out[type]) out[type] = derived[type]?.size || 0;
+    return out;
+  }, [inventoryCounts, costRows]);
+  const filterCost = useMemo(() => costRows.reduce((total, row) => {
+    const type = detectTypeFromSkuText(costText(row).toLowerCase());
+    return filter === 'all' || type === filter ? total + Number(row.total_cost || 0) : total;
+  }, 0), [costRows, filter]);
 
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchInput), 300);
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const filteredResources = resources;
+  const filteredResources = useMemo(() => {
+    if (resources.length || !COST_TYPE_KEYS.includes(filter)) return resources;
+    return costRows.filter(row => detectTypeFromSkuText(costText(row).toLowerCase()) === filter)
+      .filter(row => !searchQuery.trim() || resourceNameFromCostRow(row).toLowerCase().includes(searchQuery.trim().toLowerCase()))
+      .slice(0, 300).map(row => ({ id: row.resource_id, name: resourceNameFromCostRow(row), type: filter,
+        compartment_id: row.compartment_id || 'unknown', status: 'COST_DETECTED', shape: null,
+        details: { image_name: 'Detected from OCI billed usage' } }));
+  }, [resources, costRows, filter, searchQuery]);
 
   const fetchResources = async () => {
     try {
@@ -375,41 +303,8 @@ function Resources({ activeRegion = 'all' }) {
         ...(activeRegion && activeRegion !== 'all' ? { region: activeRegion } : {}),
         limit: searchQuery.trim() ? 5000 : 1000,
       };
-      const [res, costRes] = await Promise.all([
-        getDataResources(params),
-        getCostsByResource(_buildPeriodParams(period)).catch(() => null),
-      ]);
-      const map = {};
-      for (const row of (costRes?.data?.data || [])) {
-        if (row.resource_id && row.total_cost) map[row.resource_id] = row.total_cost;
-      }
-      setCostMap(map);
-      let data = res.data.data || [];
-      if (COST_TYPE_KEYS.includes(filter) && data.length === 0) {
-        try {
-          const byRes = await getCostsByResource(_buildPeriodParams(period));
-          const fallbackRows = (byRes.data?.data || []).filter((r) => {
-            const text = (r.skus || []).map((s) => (s.sku_name || '').toLowerCase()).join(' ');
-            return detectTypeFromSkuText(text) === filter;
-          });
-          data = fallbackRows.slice(0, 300).map((r) => ({
-            id: r.resource_id,
-            name: resourceNameFromCostRow(r),
-            type: filter,
-            compartment_id: r.compartment_id || 'unknown',
-            status: 'COST_DETECTED',
-            shape: null,
-            details: {
-              image_name: 'Detected from OCI cost usage',
-              image_family: filter,
-              image_vendor: filter === 'security_appliance' ? 'security_vendor' : filter.includes('windows') || filter.includes('sql') ? 'microsoft' : null,
-              total_cost_estimate: r.total_cost,
-            },
-          }));
-        } catch {
-          // keep empty fallback
-        }
-      }
+      const res = await getDataResources(params);
+      const data = res.data.data || [];
       setResources(data);
     } catch (e) {
       console.error('Failed to fetch resources:', e);
@@ -441,43 +336,16 @@ function Resources({ activeRegion = 'all' }) {
   }, [filter, compartmentId, period, refreshTick, searchQuery, activeRegion]);
 
   useEffect(() => {
-    const loadCounts = async () => {
-      try {
-        const costRes = await getCostsByResource(_buildPeriodParams(period));
-        const derived = {};
-        for (const t of COST_TYPE_KEYS) derived[t] = new Set();
-        (costRes.data?.data || []).forEach((r) => {
-          const text = (r.skus || []).map((s) => (s.sku_name || '').toLowerCase()).join(' ');
-          const t = detectTypeFromSkuText(text);
-          if (t && derived[t]) derived[t].add(r.resource_id);
-        });
-
-        const entries = await Promise.all(
-          TYPE_FILTERS.map(async (t) => {
-            const params = {
-              ...(t.key !== 'all' ? { type: t.key } : {}),
-              ...(compartmentId ? { compartment_id: compartmentId } : {}),
-              limit: 1,
-            };
-            const res = await getDataResources(params);
-            let total = res.data?.meta?.total ?? 0;
-            if (COST_TYPE_KEYS.includes(t.key) && total === 0) {
-              total = derived[t.key]?.size || 0;
-            }
-            return [t.key, total];
-          }),
-        );
-        setCounts(Object.fromEntries(entries));
-      } catch {
-        setCounts({ all: resources.length });
-      }
-    };
-    loadCounts();
-  }, [compartmentId, period, resources.length, refreshTick]);
+    let cancelled = false;
+    getDataResourceCounts({ compartment_id: compartmentId || undefined, region: activeRegion })
+      .then(res => { if (!cancelled) setCounts(res.data.data); })
+      .catch(() => { if (!cancelled) setCounts({ all: 0 }); });
+    return () => { cancelled = true; };
+  }, [compartmentId, activeRegion, refreshTick]);
 
   const _buildPeriodParams = (p) => {
     const now = new Date();
-    const end = now.toISOString().slice(0, 10);
+    const end = toIsoDate(now);
     const start = new Date(now);
     if (p === 'daily') {
       start.setDate(now.getDate() - 1);
@@ -488,44 +356,31 @@ function Resources({ activeRegion = 'all' }) {
     } else {
       start.setDate(now.getDate() - 30);
     }
-    return { start_date: start.toISOString().slice(0, 10), end_date: end };
+    return { start_date: toIsoDate(start), end_date: end };
   };
 
   useEffect(() => {
-    const loadFilterCost = async () => {
-      try {
-        const costRes = await getCostsByResource(_buildPeriodParams(period));
-        const rows = costRes.data?.data || [];
-        let total = 0;
-        for (const r of rows) {
-          const text = (r.skus || []).map((s) => (s.sku_name || '').toLowerCase()).join(' ');
-          const type = filter;
-          const match =
-            type === 'all' ||
-            (type === 'sql_server' && (text.includes('sql server') || text.includes('microsoft sql'))) ||
-            (type === 'windows_server' && text.includes('windows os')) ||
-            (type === 'security_appliance' && (text.includes('fortigate') || text.includes('palo alto') || text.includes('f5'))) ||
-            (type === 'volume_backup' && text.includes('backup')) ||
-            (type === 'nfs_file_system' && text.includes('file storage')) ||
-            (type === 'block_volume' && text.includes('block volume'));
-          if (match) total += r.total_cost || 0;
-        }
-        setFilterCost(total);
-      } catch {
-        setFilterCost(0);
-      }
-    };
-    loadFilterCost();
-  }, [filter, period]);
+    let cancelled = false;
+    setCostLoading(true); setCostError(false); setCostRows([]);
+    getCostsByResource({ ..._buildPeriodParams(period), region: activeRegion,
+      compartment_id: compartmentId || undefined, view: 'summary' })
+      .then(res => { if (!cancelled) setCostRows(res.data?.data || []); })
+      .catch(() => { if (!cancelled) setCostError(true); })
+      .finally(() => { if (!cancelled) setCostLoading(false); });
+    return () => { cancelled = true; };
+  }, [period, activeRegion, compartmentId, refreshTick]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await adminRunScan();
+      const response = await adminRunScan();
+      const run = response.data.data;
+      setScanNotice(run.status === 'already_running' ? `Scan #${run.run_id} is already running. Saved compartments appear as it progresses; open Settings → Operations for checkpoints.` : `Started scan #${run.run_id}. Inventory is saved per compartment. Refresh this page to see checkpoints, or inspect progress in Settings → Operations.`);
     } catch {
-      // Keep best-effort behavior if scan fails.
+      setScanNotice('The scan could not be started. Check your access and Diagnostics.');
+      setRefreshing(false);
+      return;
     }
-    await fetchResources();
     setRefreshTick((v) => v + 1);
   };
 
@@ -540,7 +395,7 @@ function Resources({ activeRegion = 'all' }) {
               Region: {activeRegion}
             </span>
           )}
-          <p className="mt-1 text-sm font-medium text-cyan-700">Current filter cost: ${Math.round(filterCost).toLocaleString()}</p>
+          <p className="mt-1 text-sm font-medium text-cyan-700">{costLoading ? 'Loading reported cost…' : costError ? 'Reported cost unavailable' : `Reported filter cost: $${filterCost.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}</p>
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -579,6 +434,7 @@ function Resources({ activeRegion = 'all' }) {
             <button onClick={() => { setSearchInput(''); setSearchQuery(''); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs">✕</button>
           )}
         </div>
+        {scanNotice && <p role="status" className="rounded-lg bg-sky-50 p-3 text-sm text-sky-800">{scanNotice}</p>}
         {/* Resource type filters */}
         <div className="flex flex-wrap gap-2">
           {TYPE_FILTERS.map((f) => (

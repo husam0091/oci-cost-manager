@@ -1,16 +1,19 @@
 """OCI Cost Manager - FastAPI Application."""
 
 from contextlib import asynccontextmanager
+import asyncio
+import os
 import logging
 import time
 import uuid
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from core.config import get_settings
-from core.database import init_db
+from core.database import init_db, SessionLocal
 from api.routes import (
     actions,
     compartments,
@@ -35,7 +38,7 @@ from api.routes import (
 from api.routes import data, admin, billing
 from api.routes import cache
 from api.routes import subscriptions
-from core.scheduler import start_scheduler
+from core.scheduler import start_scheduler, get_scheduler
 from core.models import Setting  # ensure models are imported
 from services.event_logger import log_event
 
@@ -48,10 +51,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
     init_db()
+    from services.scan_lifecycle import recover_orphaned_scans
+    with SessionLocal() as db:
+        recover_orphaned_scans(db)
     start_scheduler()
     yield
-    # Shutdown
-    pass
+    # Do not join long-running OCI calls during shutdown. Their kernel lease is
+    # released on process exit and their last committed checkpoint remains valid.
+    if get_scheduler().running:
+        get_scheduler().shutdown(wait=False)
 
 
 # Create FastAPI application
@@ -61,6 +69,9 @@ app = FastAPI(
     description="OCI Cost Management & Budget Validation Tool",
     lifespan=lifespan,
 )
+
+# Compress direct API responses too; nginx will not re-compress an encoded response.
+app.add_middleware(GZipMiddleware, minimum_size=2048, compresslevel=4)
 
 # Configure CORS
 app.add_middleware(
@@ -98,7 +109,7 @@ async def http_exception_with_correlation(request: Request, exc: HTTPException):
 @app.exception_handler(Exception)
 async def unhandled_exception_with_correlation(request: Request, exc: Exception):
     correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id") or str(uuid.uuid4())
-    log_event(
+    await asyncio.to_thread(log_event,
         level="error",
         log_type="backend",
         source="api",
@@ -130,17 +141,16 @@ async def request_observability_middleware(request: Request, call_next):
         status_level = "error"
     elif response.status_code >= 400:
         status_level = "warn"
-    log_event(
-        level=status_level,
-        log_type="backend",
-        source="api",
-        message="request_completed",
-        correlation_id=correlation_id,
-        route=request.url.path,
-        method=request.method,
-        status_code=response.status_code,
-        details={"elapsed_ms": elapsed_ms},
-    )
+    # Routine successes go to process logs; only errors and slow requests need
+    # DB persistence. Audit/event logging remains separate and unchanged.
+    logger.info("request_completed method=%s route=%s status=%s elapsed_ms=%s correlation_id=%s",
+                request.method, request.url.path, response.status_code, elapsed_ms, correlation_id)
+    slow_ms = max(1, int(os.getenv("REQUEST_DB_LOG_SLOW_MS", "1000")))
+    if response.status_code >= 400 or elapsed_ms >= slow_ms:
+        await asyncio.to_thread(log_event,
+            level=status_level, log_type="backend", source="api", message="request_completed",
+            correlation_id=correlation_id, route=request.url.path, method=request.method,
+            status_code=response.status_code, details={"elapsed_ms": elapsed_ms})
     return response
 app.include_router(
     me.router,
