@@ -64,6 +64,7 @@ class CostCalculatorService:
         region: Optional[str] = None,
         service: Optional[str] = None,
         resource_id: Optional[str] = None,
+        query_type: str = "COST",
     ) -> List[Dict[str, Any]]:
         """Get usage summary from OCI Usage API.
 
@@ -91,7 +92,7 @@ class CostCalculatorService:
             time_usage_started=start_date,
             time_usage_ended=end_date,
             granularity=granularity,
-            query_type="COST",
+            query_type=query_type,
             group_by=list(dict.fromkeys([*(group_by or ["service", "skuName"]), "currency"])),
             compartment_depth=6,
         )
@@ -120,33 +121,28 @@ class CostCalculatorService:
             )
         
         # Fetch usage data with global concurrency throttle and exponential backoff
-        response = None
-        last_error = None
-        max_retries = 4
+        response_rows = []
+        page = None
         _oci_usage_semaphore.acquire()
         try:
-            for attempt in range(max_retries):
-                try:
-                    response = usage_client.request_summarized_usages(request_details)
+            while True:
+                for attempt in range(4):
+                    try:
+                        response = usage_client.request_summarized_usages(request_details, **({"page": page} if page else {}))
+                        break
+                    except oci.exceptions.ServiceError as exc:
+                        if getattr(exc, "status", None) not in (429, 500, 502, 503) or attempt == 3:
+                            raise
+                        time.sleep(min(2 ** attempt + 1, 15))
+                response_rows.extend(response.data.items)
+                page = (getattr(response, "headers", None) or {}).get("opc-next-page")
+                if not page:
                     break
-                except oci.exceptions.RequestException as exc:
-                    # Network/timeout errors — don't retry, fail fast so caller uses cache.
-                    raise
-                except oci.exceptions.ServiceError as exc:
-                    last_error = exc
-                    is_429 = getattr(exc, "status", None) == 429
-                    is_transient = getattr(exc, "status", None) in (429, 500, 502, 503)
-                    if not is_transient or attempt == max_retries - 1:
-                        raise
-                    backoff = min(2 ** attempt + 1, 15)
-                    time.sleep(backoff)
         finally:
             _oci_usage_semaphore.release()
-        if response is None and last_error:
-            raise last_error
-        
+
         items = []
-        for item in response.data.items:
+        for item in response_rows:
             # Get cost amount - try different attribute names
             cost = None
             if getattr(item, 'computed_amount', None) is not None:
@@ -154,6 +150,8 @@ class CostCalculatorService:
             elif getattr(item, 'cost', None) is not None:
                 cost = float(item.cost)
             
+            if cost is None and getattr(item, "computed_quantity", None) is not None and Decimal(str(item.computed_quantity)) == 0:
+                cost = 0.0
             if cost is None:
                 raise ValueError("OCI did not supply a computed cost amount")
             items.append({

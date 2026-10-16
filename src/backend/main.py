@@ -37,7 +37,7 @@ from api.routes import (
 )
 from api.routes import data, admin, billing
 from api.routes import cache
-from api.routes import subscriptions
+from api.routes import subscriptions, commitments
 from core.scheduler import start_scheduler, get_scheduler
 from core.models import Setting  # ensure models are imported
 from services.event_logger import log_event
@@ -207,6 +207,7 @@ app.include_router(
     prefix=settings.api_prefix,
     tags=["Recommendations"],
 )
+app.include_router(commitments.router, prefix=f"{settings.api_prefix}/subscriptions", tags=["commitments"])
 app.include_router(
     subscriptions.router,
     prefix=f"{settings.api_prefix}/subscriptions",

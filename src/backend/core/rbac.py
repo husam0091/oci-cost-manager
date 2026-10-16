@@ -195,5 +195,6 @@ def feature_flags(setting: Optional[Setting]) -> dict[str, Any]:
         "enable_destructive_actions": bool(getattr(setting, "enable_destructive_actions", False)) if setting else False,
         "enable_notifications": bool(getattr(setting, "notifications_email_enabled", False) or getattr(setting, "notifications_webhook_enabled", False)) if setting else False,
         "enable_budget_auto_eval": bool(getattr(setting, "enable_budget_auto_eval", True)) if setting else True,
+        "commitments_enabled": bool(getattr(setting, "commitments_enabled", True)) if setting else True,
         "enable_demo_mode": bool(getattr(setting, "enable_demo_mode", False)) if setting else False,
     }

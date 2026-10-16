@@ -632,6 +632,8 @@ def _queue_post_scan_refresh_jobs(db: Session, run_id: int) -> None:
         import uuid
         from worker import celery_app
 
+        from services.commitments import queue_sync
+        queue_sync(db, "post_scan")
         corr = f"scan:{run_id}"
         agg_job = JobRun(
             id=str(uuid.uuid4()),

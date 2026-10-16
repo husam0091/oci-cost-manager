@@ -165,6 +165,7 @@ def test_feature_flags_with_none_setting_returns_defaults():
         "enable_notifications",
         "enable_budget_auto_eval",
         "enable_demo_mode",
+        "commitments_enabled",
     }
     assert set(flags.keys()) == expected_keys
     assert flags["enable_oci_executors"] is False

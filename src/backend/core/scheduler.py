@@ -76,4 +76,6 @@ def start_scheduler():
     if not sched.running:
         sched.start()
     schedule_scan()
+    from services.commitments import scheduled_sync
+    sched.add_job(scheduled_sync, trigger=IntervalTrigger(hours=24), id="subscription_sync", replace_existing=True, max_instances=1)
     sched.add_job(retention_job, trigger=IntervalTrigger(hours=24), id="log_retention", replace_existing=True, max_instances=1)

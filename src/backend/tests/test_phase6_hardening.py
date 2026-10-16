@@ -43,7 +43,7 @@ def test_feature_flags_get_update():
         )
         assert update.status_code == 200
         data = update.json()["data"]
-        assert set(data.keys()) == {"enable_oci_executors", "enable_destructive_actions", "enable_notifications", "enable_budget_auto_eval", "enable_demo_mode"}
+        assert set(data.keys()) == {"enable_oci_executors", "enable_destructive_actions", "enable_notifications", "enable_budget_auto_eval", "enable_demo_mode", "commitments_enabled"}
         fetched = client.get("/api/v1/admin/settings/feature-flags")
         assert fetched.status_code == 200
     finally:

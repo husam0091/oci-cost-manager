@@ -344,3 +344,18 @@ def logs_export(job_id: str, params: dict | None = None) -> dict:
         raise
     finally:
         db.close()
+
+
+@celery_app.task(name="jobs.subscription_sync")
+def subscription_sync(job_id: str, params: dict | None = None) -> dict:
+    from services.commitments import sync
+    with SessionLocal() as db:
+        try:
+            _set_job_state(db, job_id, status="running", progress=5)
+            result = sync(db)
+            _set_job_state(db, job_id, status="succeeded", progress=100, result=result)
+            return result
+        except Exception:
+            db.rollback()
+            _set_job_state(db, job_id, status="failed", progress=100, error_message="Subscription sync failed; see subscription source diagnostics")
+            raise

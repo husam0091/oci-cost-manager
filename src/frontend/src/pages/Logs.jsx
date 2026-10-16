@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { exportLogs, getLogs, getLogsTimeline } from '../services/api';
+import { exportLogs, getLogs, getLogsTimeline, getSubscriptionDiagnostics } from '../services/api';
 
 const QUICK_RANGES = [
   { key: '15m', label: 'Last 15m', mins: 15 },
@@ -14,6 +14,13 @@ const buildFromIso = (mins) => new Date(Date.now() - (mins * 60 * 1000)).toISOSt
 
 export default function Logs({ role = 'viewer' }) {
   const authorized = role === 'admin' || role === 'finops';
+  const [subscriptionDiagnostics, setSubscriptionDiagnostics] = useState(null);
+  useEffect(() => {
+    if (!authorized) return;
+    let cancelled = false;
+    getSubscriptionDiagnostics().then(({data}) => { if (!cancelled) setSubscriptionDiagnostics(data.data); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [authorized]);
   const [loading, setLoading] = useState(true);
   const [logs, setLogs] = useState([]);
   const [expanded, setExpanded] = useState({});
@@ -69,6 +76,8 @@ export default function Logs({ role = 'viewer' }) {
 
   return (
     <div className="space-y-4">
+      {subscriptionDiagnostics && <section className="finops-panel p-4"><h3>Subscription sources · {subscriptionDiagnostics.status}</h3><p>{subscriptionDiagnostics.iam_note}</p>{Object.entries(subscriptionDiagnostics.sources || {}).map(([name, source]) => <details key={name}><summary>{name} · {source.status}</summary><pre className="whitespace-pre-wrap text-xs">{source.error || `${source.count ?? 0} rows returned`}</pre>{source.policies?.map(policy => <pre className="whitespace-pre-wrap text-xs" key={policy}>{policy}</pre>)}</details>)}<details><summary>IAM policy checklist</summary>{Object.values(subscriptionDiagnostics.policies || {}).flat().map(policy => <pre className="whitespace-pre-wrap text-xs" key={policy}>{policy}</pre>)}</details></section>}
+
       <div className="rounded-xl border border-slate-200 bg-white p-4">
         <h3 className="text-lg font-semibold text-slate-900">Logs & Diagnostics</h3>
         <p className="mt-1 text-sm text-slate-600">Classified logs with correlation search and export.</p>

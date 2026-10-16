@@ -511,3 +511,13 @@ export const adminUpdateRegions = (data) => api.put('/admin/regions', data);
 export const getBilledSpend = (params = {}) => api.get('/billing/spend', { params, timeout: 120000 });
 
 export const getDataResourceCounts = (params = {}) => api.get('/data/resource-counts', { params });
+
+export const getCommitmentContracts = () => api.get('/subscriptions/contracts');
+export const getCommitmentOverview = (params) => api.get('/subscriptions/overview', { params });
+export const getCommitmentBreakdown = (params) => api.get('/subscriptions/breakdown', { params });
+export const syncCommitments = () => api.post('/subscriptions/sync');
+export const createCommitment = (body) => api.post('/subscriptions/contracts', body);
+
+export const getSubscriptionDiagnostics = () => api.get('/subscriptions/diagnostics');
+
+export const getCommitmentSyncJob = id => api.get(`/jobs/${encodeURIComponent(id)}`);

@@ -436,3 +436,7 @@ Built for OCI FinOps teams who need cost visibility beyond the native console.
 See [Interface 2.2 runtime guide](docs/runtime-reliability-2.2.md) for scan recovery,
 compartment checkpoints, cache/payload fixes, deployment checks, and the recommended
 migration to durable inventory jobs and database-backed billing ingestion.
+
+### Commitment vs Spend (Interface 2.3.0)
+
+Open **Commitments** for subscription-anniversary/calendar allowance comparisons with actual OCI spend, currency-separated forecasts, service/team/compartment charts and CSV/XLSX exports. OCI discovery runs as a heavy background job; manual contracts are explicitly labeled. See [setup, IAM diagnostics, accounting rules and deployment](docs/commitments.md). Subscription data access may need additional tenancy permissions; missing data is never replaced with estimated billing values.

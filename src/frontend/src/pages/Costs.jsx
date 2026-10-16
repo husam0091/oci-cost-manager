@@ -25,7 +25,7 @@ export default function Costs({
   } : getDateRangeForPreset('prev_month'));
   const previousRegion = useRef(activeRegion);
   const [preset, setPreset] = useState(initial?.startDate ? 'custom' : 'prev_month');
-  const [service, setService] = useState('');
+  const [service, setService] = useState(initial?.service || '');
   const [resource, setResource] = useState(initial?.resourceId ? {
     id: initial.resourceId,
     name: initial.resourceName || initial.resourceId

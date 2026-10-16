@@ -61,6 +61,7 @@ class Setting(Base):
     enable_oci_executors = Column(Boolean, nullable=False, default=False)
     enable_destructive_actions = Column(Boolean, nullable=False, default=False)
     enable_budget_auto_eval = Column(Boolean, nullable=False, default=True)
+    commitments_enabled = Column(Boolean, nullable=False, default=True)
     enable_demo_mode = Column(Boolean, nullable=False, default=False)
     portal_ssl_enabled = Column(Boolean, nullable=False, default=False)
     portal_ssl_mode = Column(String(32), nullable=True)
@@ -443,3 +444,42 @@ class AuditEvent(Base):
         Index("idx_audit_events_action_ts", "action", "ts"),
         Index("idx_audit_events_correlation_id", "correlation_id"),
     )
+
+
+class SubscriptionContract(Base):
+    __tablename__ = "subscription_contracts"
+    id = Column(String(255), primary_key=True)
+    source = Column(String(64), nullable=False)
+    name = Column(String(255), nullable=False)
+    status = Column(String(64), nullable=False, default="active")
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)  # exclusive
+    total_value = Column(Numeric(24, 8), nullable=True)
+    currency = Column(String(16), nullable=False)
+    term_months = Column(Integer, nullable=False)
+    details = Column(JSON, nullable=False, default=dict)
+    computed_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class SubscriptionPeriod(Base):
+    __tablename__ = "subscription_periods"
+    id = Column(String(255), primary_key=True)
+    contract_id = Column(String(255), nullable=False, index=True)
+    mode = Column(String(16), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    allowance = Column(Numeric(24, 8), nullable=True)
+    actual = Column(Numeric(24, 8), nullable=True)
+    forecast = Column(Numeric(24, 8), nullable=True)
+    details = Column(JSON, nullable=False, default=dict)
+    computed_at = Column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (UniqueConstraint("contract_id", "mode", "start_date", name="uq_subscription_period"),)
+
+
+class SubscriptionSyncRun(Base):
+    __tablename__ = "subscription_sync_runs"
+    id = Column(String(64), primary_key=True)
+    status = Column(String(32), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    sources = Column(JSON, nullable=False, default=dict)

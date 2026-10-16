@@ -35,7 +35,7 @@ def explain_spend(
     totals = {}
     lines = []
     for item in items:
-        currency = item.get("currency") or "Unspecified"
+        currency = str(item.get("currency") or "").strip() or "Unspecified"
         cost = Decimal(str(item.get("computed_amount") or 0))
         bucket = totals.setdefault(
             currency, {"charges": Decimal(0), "credits": Decimal(0), "net": Decimal(0)}
