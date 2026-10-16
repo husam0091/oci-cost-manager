@@ -355,7 +355,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
       if (onAuthChange) onAuthChange(true, username);
       checkLoginStatus();
     } catch (err) {
-      setLoginError(err.response?.data?.detail || 'Login failed');
+      setLoginError(err.response?.data?.error?.reason || (typeof err.response?.data?.detail === 'string' ? err.response.data.detail : 'Sign-in failed. Check your username and password.'));
     } finally {
       setLoginLoading(false);
     }
@@ -493,11 +493,13 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
         <div className="rounded-3xl border border-white/50 bg-white/85 p-8 shadow-xl dark:border-slate-700 dark:bg-slate-800">
           <div className="mb-6 flex items-center gap-3">
             <div className="rounded-xl bg-cyan-100 p-3"><LogIn className="text-cyan-700" size={24} /></div>
-            <div><h1 className="text-xl font-bold text-slate-900">Admin Login</h1></div>
+            <div><h1 className="text-xl font-bold text-slate-900">Welcome back</h1><p className="mt-2 text-sm text-slate-500">Sign in to your cloud cost workspace.</p></div>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
-            <input id="login-username" name="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2" placeholder="Username" required />
-            <input id="login-password" name="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2" placeholder="Password" required />
+            <label htmlFor="login-username" className="block text-sm font-medium text-slate-600">Username</label>
+            <input autoComplete="username" id="login-username" name="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2" placeholder="Username" required />
+            <label htmlFor="login-password" className="block text-sm font-medium text-slate-600">Password</label>
+            <input autoComplete="current-password" id="login-password" name="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded-lg border border-slate-300 px-4 py-2" placeholder="Password" required />
             {loginError && <div className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{loginError}</div>}
             <button type="submit" disabled={loginLoading} className="w-full rounded-lg bg-cyan-600 px-4 py-2 font-medium text-white">
               {loginLoading ? 'Signing in...' : 'Sign In'}

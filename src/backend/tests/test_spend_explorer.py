@@ -205,6 +205,8 @@ def test_billed_spend_auth_scope_pagination_and_cache(inventory, monkeypatch):
     first = client.get(url).json()
     assert first["data"]["totals"][0]["net"] == 170
     assert first["meta"]["has_more"] is True
+    assert sum(s["cost"] for s in first["data"]["by_service"]) == 170
+    assert len(first["data"]["resources"]) == 3
     assert first["meta"]["cached"] is False
     assert client.get(url + "&offset=1").json()["meta"]["cached"] is True
     assert len(calls) == 1
@@ -240,3 +242,34 @@ def test_billing_errors_never_substitute_fake_zero(inventory, monkeypatch):
     response = client.get("/billing/spend?start_date=2026-01-01&end_date=2026-01-31")
     assert response.status_code == 503
     assert "private credential" not in response.text
+
+
+def test_overview_aggregates_all_groups_without_mixing_currencies():
+    result = explain_spend(
+        [
+            dict(
+                service="Compute", resource_id="r1", computed_amount=100, currency="USD"
+            ),
+            dict(
+                service="Compute", resource_id="r1", computed_amount=-20, currency="USD"
+            ),
+            dict(
+                service="Compute", resource_id="r1", computed_amount=300, currency="SAR"
+            ),
+            dict(service="Storage", computed_amount=15, currency="USD"),
+        ],
+        {},
+    )
+    usd_services = [s for s in result["by_service"] if s["currency"] == "USD"]
+    assert usd_services == [
+        dict(currency="USD", service="Compute", cost=80),
+        dict(currency="USD", service="Storage", cost=15),
+    ]
+    usd_resource = next(
+        r
+        for r in result["resources"]
+        if r["currency"] == "USD" and r["resource_id"] == "r1"
+    )
+    assert usd_resource["cost"] == 80
+    assert usd_resource["billing_groups"] == 2
+    assert sum(r["cost"] for r in result["resources"] if r["currency"] == "USD") == 95

@@ -82,7 +82,43 @@ def explain_spend(
             row["sku_name"],
         )
     )
+    # Aggregate the complete response before the route slices the visible page.
+    service_totals = {}
+    resource_totals = {}
+    for line in lines:
+        key = (line["currency"], line["service"])
+        service_totals[key] = service_totals.get(key, Decimal(0)) + Decimal(
+            str(line["cost"])
+        )
+        key = (line["currency"], line["resource_id"])
+        resource = resource_totals.setdefault(
+            key,
+            {
+                "currency": line["currency"],
+                "resource_id": line["resource_id"],
+                "resource_name": line["resource_name"],
+                "region": line["region"],
+                "compartment_id": line["compartment_id"],
+                "cost": Decimal(0),
+                "billing_groups": 0,
+            },
+        )
+        resource["cost"] += Decimal(str(line["cost"]))
+        resource["billing_groups"] += 1
+    by_service = [
+        {"currency": c, "service": name, "cost": float(cost)}
+        for (c, name), cost in service_totals.items()
+    ]
+    by_service.sort(key=lambda row: (row["currency"], -row["cost"], row["service"]))
+    resources = [
+        {**row, "cost": float(row["cost"])} for row in resource_totals.values()
+    ]
+    resources.sort(
+        key=lambda row: (row["currency"], -row["cost"], row["resource_name"])
+    )
     return {
+        "by_service": by_service,
+        "resources": resources,
         "services": sorted(
             {
                 line["service"]

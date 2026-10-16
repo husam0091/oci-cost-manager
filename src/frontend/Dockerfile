@@ -2,6 +2,9 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
+ARG VITE_BUILD_SHA=local
+ENV VITE_BUILD_SHA=$VITE_BUILD_SHA
+
 COPY package*.json ./
 RUN npm ci
 
