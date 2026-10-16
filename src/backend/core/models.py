@@ -483,3 +483,17 @@ class SubscriptionSyncRun(Base):
     started_at = Column(DateTime(timezone=True), nullable=False)
     finished_at = Column(DateTime(timezone=True), nullable=True)
     sources = Column(JSON, nullable=False, default=dict)
+
+
+class SubscriptionContractLine(Base):
+    __tablename__ = "subscription_contract_lines"
+    id = Column(String(255), primary_key=True)
+    contract_id = Column(String(255), nullable=True, index=True)
+    source_contract_id = Column(String(255), nullable=False, unique=True)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    total_value = Column(Numeric(24, 8), nullable=True)
+    currency = Column(String(16), nullable=False)
+    status = Column(String(64), nullable=False)
+    details = Column(JSON, nullable=False, default=dict)
+    computed_at = Column(DateTime(timezone=True), nullable=False)

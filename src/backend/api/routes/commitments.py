@@ -22,6 +22,8 @@ from core.models import (
 from core.rbac import resolve_principal
 from services.commitments import D, queue_sync, month_at, category, spend_eligible
 from services.subscription_sources import POLICIES
+from services.subscription_terms import visible, group_label
+from core.models import SubscriptionContractLine
 
 router = APIRouter()
 
@@ -65,6 +67,12 @@ def contract_json(row):
         "term_months": row.term_months,
         "computed_at": row.computed_at.isoformat(),
         "manual": row.source == "manual",
+        "selector_group": group_label(row),
+        "source_label": (
+            "Entered manually" if row.source == "manual" else "From OCI subscription"
+        ),
+        "line_count": len((row.details or {}).get("source_line_ids", [])),
+        "grouping_note": (row.details or {}).get("grouping_note"),
         "payment_model": (row.details or {}).get("payment_model"),
         "spend_category": (
             "oci_infrastructure"
@@ -117,11 +125,12 @@ def contracts(
         case((SubscriptionContract.source == "manual", 1), else_=0),
         SubscriptionContract.start_date.desc(),
     )
+    selected = [row for row in rows.all() if visible(row)]
     return {
         "success": True,
-        "data": [contract_json(row) for row in rows.offset(offset).limit(limit).all()],
+        "data": [contract_json(row) for row in selected[offset : offset + limit]],
         "meta": {
-            "total": rows.count(),
+            "total": len(selected),
             "diagnostics": diagnostics(db),
             "estimates": ["manual_contracts"],
         },
@@ -251,6 +260,10 @@ def period_json(row, currency, region):
 def view(db, contract_id, mode, region, principal):
     if contract_id:
         contract = db.get(SubscriptionContract, contract_id)
+        if contract and (contract.details or {}).get("superseded_by"):
+            contract = db.get(SubscriptionContract, contract.details["superseded_by"])
+        if contract and not visible(contract):
+            contract = None
     else:
         candidates = (
             db.query(SubscriptionContract)
@@ -263,7 +276,8 @@ def view(db, contract_id, mode, region, principal):
         candidates = [
             row
             for row in candidates
-            if spend_eligible(row)
+            if visible(row)
+            and spend_eligible(row)
             and row.total_value is not None
             and row.total_value > 0
             and row.status.lower()
@@ -659,3 +673,43 @@ def export_periods(
         workbook.save(path)
         media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     return FileResponse(path, filename=path.name, media_type=media)
+
+
+@router.get("/contracts/{contract_id}/lines")
+def contract_lines(
+    contract_id: str,
+    token: Optional[str] = Cookie(None, alias="access_token"),
+    db: Session = Depends(get_db),
+):
+    authorize(db, token)
+    row = db.get(SubscriptionContract, contract_id)
+    if not row or not visible(row):
+        raise HTTPException(404, "Term not found")
+    lines = (
+        db.query(SubscriptionContractLine)
+        .filter_by(contract_id=contract_id)
+        .order_by(SubscriptionContractLine.start_date)
+        .limit(200)
+        .all()
+    )
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": line.id,
+                "start_date": line.start_date.isoformat(),
+                "end_date": line.end_date.isoformat(),
+                "value": (
+                    float(line.total_value) if line.total_value is not None else None
+                ),
+                "currency": line.currency,
+                "status": line.status,
+                "subscribed_service_id": (line.details or {}).get(
+                    "subscribed_service_id"
+                ),
+                "order_line_id": (line.details or {}).get("order_line_id"),
+            }
+            for line in lines
+        ],
+        "meta": {"source": "Preserved OCI service lines", "limit": 200},
+    }

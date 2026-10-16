@@ -9,6 +9,7 @@ from core.models import SubscriptionContract
 from api.routes.commitments import authorize, contract_json
 from services.cost_calculator import get_cost_calculator
 from services.commitments import D, spend_eligible
+from services.subscription_terms import visible
 from core.cache import get_cached, set_cached
 
 router = APIRouter()
@@ -32,7 +33,8 @@ def get_subscriptions(
     rows = [
         row
         for row in rows
-        if spend_eligible(row)
+        if visible(row)
+        and spend_eligible(row)
         and row.status.lower()
         not in {"expired", "cancelled", "canceled", "terminated", "inactive"}
     ]

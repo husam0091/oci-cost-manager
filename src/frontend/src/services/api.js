@@ -521,3 +521,5 @@ export const createCommitment = (body) => api.post('/subscriptions/contracts', b
 export const getSubscriptionDiagnostics = () => api.get('/subscriptions/diagnostics');
 
 export const getCommitmentSyncJob = id => api.get(`/jobs/${encodeURIComponent(id)}`);
+
+export const getContractLines = id => api.get(`/subscriptions/contracts/${encodeURIComponent(id)}/lines`);

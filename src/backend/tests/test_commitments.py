@@ -821,7 +821,9 @@ def test_sync_skips_expired_saas_zero_and_metadata_contracts_and_bounds_detail(
         for _, kw in costs
         if kw["granularity"] == "DAILY"
     )
-    assert {row.contract_id for row in db.query(SubscriptionPeriod)} == {"uc"}
+    assert {row.contract_id for row in db.query(SubscriptionPeriod)} == {
+        db.get(SubscriptionContract, "uc").details["superseded_by"]
+    }
     assert (
         client.get("/subscriptions/overview").json()["data"]["consumed_to_date"] == 10
     )
@@ -938,7 +940,9 @@ def test_january_23_anniversary_and_exact_term_spend_start(api, monkeypatch):
     active = (
         db.query(SubscriptionPeriod)
         .filter_by(
-            contract_id="annual-jan23",
+            contract_id=db.get(SubscriptionContract, "annual-jan23").details[
+                "superseded_by"
+            ],
             mode="subscription",
             start_date=date(2026, 9, 23),
         )
@@ -949,8 +953,228 @@ def test_january_23_anniversary_and_exact_term_spend_start(api, monkeypatch):
         sum(
             row.actual
             for row in db.query(SubscriptionPeriod).filter_by(
-                contract_id="annual-jan23", mode="subscription"
+                contract_id=db.get(SubscriptionContract, "annual-jan23").details[
+                    "superseded_by"
+                ],
+                mode="subscription",
             )
         )
         == 20
+    )
+
+
+def test_term_hygiene_tamam_shape_and_line_audit(api):
+    from services.commitments import term_candidates
+    from services.subscription_terms import consolidate, visible
+    from core.models import SubscriptionContractLine
+
+    client, db, _ = api
+    now = datetime.now(UTC)
+    lines = [
+        ("2026-base", "2026-01-23", "2027-01-22", "1710000", "ACTIVE", None),
+        ("2026-addendum", "2026-09-10", "2027-01-22", "0", "ACTIVE", None),
+        (
+            "2025-a",
+            "2025-03-27",
+            "2026-03-26",
+            "712500",
+            "EXPIRED",
+            "verified-term-2025",
+        ),
+        (
+            "2025-b",
+            "2025-03-28",
+            "2026-03-27",
+            "212372.50",
+            "EXPIRED",
+            "verified-term-2025",
+        ),
+        (
+            "2025-c",
+            "2025-09-10",
+            "2026-09-09",
+            "408500",
+            "EXPIRED",
+            "verified-term-2025",
+        ),
+        ("2024-a", "2024-10-20", "2025-10-19", "289239.85", "EXPIRED", None),
+        ("2024-b", "2024-10-20", "2025-10-19", "426478.75", "EXPIRED", None),
+        ("2023", "2023-10-30", "2024-10-29", "278583.70", "EXPIRED", None),
+    ]
+    parent = dict(
+        id="classic-uc",
+        classic_subscription_id="classic-uc",
+        organization_id="org-uc",
+        source="oci:onesubscription",
+        service_name="Universal Credits",
+        currency={"iso_code": "USD"},
+        time_start="2023-10-30",
+        time_end=None,
+        subscribed_services=[
+            dict(
+                id=i,
+                time_start=a,
+                time_end=b,
+                total_value=v,
+                status=status,
+                subscription_term_id=term,
+            )
+            for i, a, b, v, status, term in lines
+        ],
+    )
+    for raw in term_candidates(parent):
+        db.add(SubscriptionContract(**normalize(raw, now)))
+    db.add(
+        SubscriptionContract(
+            id="org-uc",
+            source="oci:organizations",
+            name="CLOUDCM",
+            start_date=date(2026, 1, 23),
+            end_date=date(2027, 1, 22),
+            currency="USD",
+            term_months=12,
+            computed_at=now,
+            details={"classic_subscription_id": "classic-uc"},
+        )
+    )
+    db.add(
+        SubscriptionContract(
+            id="saas",
+            source="oci:onesubscription",
+            name="Fusion HCM Cloud",
+            status="ACTIVE",
+            start_date=date(2024, 11, 30),
+            end_date=date(2027, 11, 30),
+            currency="USD",
+            total_value=399600,
+            term_months=36,
+            computed_at=now,
+            details={"source_evidence": {"service_name": "Fusion HCM Cloud"}},
+        )
+    )
+    db.commit()
+    ids = consolidate(db, now)
+    first_count = db.query(SubscriptionContractLine).count()
+    consolidate(db, now)
+    assert db.query(SubscriptionContractLine).count() == first_count == 9
+    payload = client.get("/subscriptions/contracts").json()["data"]
+    infra = [row for row in payload if row["resource_usage_applicable"]]
+    assert len(infra) == 4
+    active = [
+        row
+        for row in infra
+        if row["selector_group"] == "Infrastructure (Universal Credits)"
+    ]
+    assert len(active) == 1 and active[0]["total_value"] == 1710000
+    assert len([row for row in infra if row["selector_group"] == "Expired terms"]) == 3
+    assert len({row["name"] for row in payload}) == len(payload)
+    assert not any(
+        row["source"] == "oci:organizations" or row["total_value"] == 0
+        for row in payload
+    )
+    children = client.get(f"/subscriptions/contracts/{active[0]['id']}/lines").json()[
+        "data"
+    ]
+    assert len(children) == 2 and sorted(row["value"] for row in children) == [
+        0,
+        1710000,
+    ]
+    assert any(row["selector_group"] == "SaaS (Fusion, EPM)" for row in payload)
+
+
+def test_overlap_alone_never_merges_financial_terms(api):
+    from services.subscription_terms import consolidate, visible
+
+    client, db, _ = api
+    now = datetime.now(UTC)
+    for identity, left, right in [
+        ("one", date(2025, 3, 27), date(2026, 3, 26)),
+        ("two", date(2025, 9, 10), date(2026, 9, 9)),
+    ]:
+        db.add(
+            SubscriptionContract(
+                id=identity,
+                source="oci:onesubscription",
+                name="Universal Credits",
+                start_date=left,
+                end_date=right,
+                total_value=100,
+                currency="USD",
+                term_months=12,
+                status="EXPIRED",
+                computed_at=now,
+                details={
+                    "classic_subscription_id": "same-parent",
+                    "source_evidence": {"service_name": "Universal Credits"},
+                },
+            )
+        )
+    db.commit()
+    consolidate(db, now)
+    assert len([row for row in db.query(SubscriptionContract) if visible(row)]) == 2
+
+
+def test_consolidation_rekeys_reconciled_spend_once_and_recomputes_allowance(api):
+    from services.subscription_terms import consolidate
+
+    client, db, _ = api
+    now = datetime.now(UTC)
+    left = now.date().replace(day=1)
+    right = month_at(left, 12)
+    for identity, value in [("first", 1000), ("second", 2000)]:
+        db.add(
+            SubscriptionContract(
+                id=identity,
+                source="oci:onesubscription",
+                name="Universal Credits",
+                start_date=left,
+                end_date=right,
+                total_value=value,
+                currency="USD",
+                term_months=12,
+                status="ACTIVE",
+                computed_at=now,
+                details={
+                    "classic_subscription_id": "same-parent",
+                    "source_evidence": {"service_name": "Universal Credits"},
+                },
+            )
+        )
+        db.add(
+            SubscriptionPeriod(
+                id=identity + "-period",
+                contract_id=identity,
+                mode="subscription",
+                start_date=left,
+                end_date=month_at(left, 1),
+                allowance=1,
+                actual=25,
+                computed_at=now,
+                details={
+                    "complete": True,
+                    "elapsed_days": 10,
+                    "facts": [
+                        dict(
+                            currency="USD",
+                            region="fixture",
+                            service="Compute",
+                            amount="25",
+                        )
+                    ],
+                },
+            )
+        )
+    db.commit()
+    consolidate(db, now)
+    result = client.get("/subscriptions/overview").json()["data"]
+    assert result["contract"]["total_value"] == 3000
+    assert (
+        result["consumed_to_date"] == 25
+    )  # not 50: one tenancy, not one copy of spend per line
+    assert result["periods"][0]["allowance"] == 250
+    assert (
+        client.get("/subscriptions/overview?contract_id=first").json()["data"][
+            "contract"
+        ]["id"]
+        == result["contract"]["id"]
     )

@@ -361,6 +361,9 @@ def sync(db):
                     setattr(model, key, value)
                 db.add(model)
             db.commit()
+            from services.subscription_terms import consolidate
+
+            consolidate(db, now)
         except Exception as exc:
             logger.exception("subscription_discovery_failed sync_id=%s", run.id)
             reports["oci:discovery"] = {
@@ -385,13 +388,20 @@ def sync(db):
         retention_start = month_at(today.replace(day=1), -12)
         detail_facts = {}
         for contract in contracts:
-            if not spend_eligible(contract) or contract.status.lower() in {
-                "expired",
-                "cancelled",
-                "canceled",
-                "terminated",
-                "inactive",
-            }:
+            from services.subscription_terms import visible
+
+            if (
+                not visible(contract)
+                or not spend_eligible(contract)
+                or contract.status.lower()
+                in {
+                    "expired",
+                    "cancelled",
+                    "canceled",
+                    "terminated",
+                    "inactive",
+                }
+            ):
                 continue
             left = contract.start_date.replace(day=1)
             while left < min(contract.end_date, today + timedelta(days=1)):
