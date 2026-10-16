@@ -66,6 +66,120 @@ def parse_date(value):
     return date.fromisoformat(str(value)[:10])
 
 
+def category(raw):
+    explicit = raw.get("spend_category")
+    if explicit in {"oci_infrastructure", "saas", "unknown"}:
+        return explicit
+    names = " ".join(
+        str(raw.get(key) or "")
+        for key in ("service_name", "parent_service_name", "organization_service_name")
+    )
+    compact = re.sub(r"[^a-z0-9]", "", names.lower())
+    if "universalcredits" in compact or "cloudcm" in compact:
+        return "oci_infrastructure"
+    if any(
+        word in names.lower().split()
+        for word in ("fusion", "erp", "hcm", "epm", "planning")
+    ):
+        return "saas"
+    return "unknown"
+
+
+def spend_eligible(contract):
+    details = contract.details or {}
+    if contract.source == "manual":
+        return (
+            details.get("spend_category", "oci_infrastructure") == "oci_infrastructure"
+        )
+    return (
+        category(
+            {
+                **(details.get("source_evidence") or {}),
+                **(
+                    {"spend_category": details["spend_category"]}
+                    if "spend_category" in details
+                    else {}
+                ),
+            }
+        )
+        == "oci_infrastructure"
+    )
+
+
+def term_candidates(raw):
+    """An auto-renewing parent need not have dates. Financial terms live in child services.
+
+    The separately listed service ID is authoritative for commitment lookups; embedded IDs
+    may be order-line IDs. Preserve both without substituting one for the other.
+    """
+    if raw.get("source") != "oci:onesubscription":
+        return [raw]
+    embedded = raw.get("subscribed_services") or []
+    detailed = raw.get("services") or []
+    services = []
+    matched = set()
+    for service in detailed:
+        match = next(
+            (
+                row
+                for row in embedded
+                if str(row.get("id"))
+                in {str(service.get("id")), str(service.get("order_line_id"))}
+            ),
+            None,
+        )
+        if match:
+            matched.add(str(match.get("id")))
+        services.append(
+            {
+                **(match or {}),
+                **{key: value for key, value in service.items() if value is not None},
+                "subscribed_service_id": service.get("id"),
+                "order_line_id": service.get("order_line_id")
+                or (match or {}).get("id"),
+            }
+        )
+    services.extend(
+        {**row, "subscribed_service_id": None, "order_line_id": row.get("id")}
+        for row in embedded
+        if str(row.get("id")) not in matched
+    )
+    if not services:
+        return [raw]
+    result = []
+    for service in services:
+        identity = service.get("subscribed_service_id") or service.get("order_line_id")
+        if identity is None:
+            continue
+        start = service.get("time_start")
+        parent_name = (
+            raw.get("service_name")
+            or raw.get("organization_service_name")
+            or "Subscription"
+        )
+        result.append(
+            {
+                **raw,
+                **service,
+                "id": f"{raw['id']}:service:{identity}",
+                "service_name": (
+                    f"{parent_name}, term {str(start)[:4]}"
+                    if start
+                    else f"{parent_name}, undated term"
+                ),
+                "total_value": service.get("total_value"),
+                "parent_service_name": parent_name,
+                "parent_subscription_id": raw["id"],
+                "source": raw["source"],
+                "currency": service.get("currency") or raw.get("currency"),
+                "subscribed_services": [],
+                "services": [],
+                "spend_category": category(raw),
+            }
+        )
+    return result
+
+
 def normalize(raw, now):
     """Only explicit subscription monetary totals are eligible. SKU quantity is never currency."""
     currency = (
@@ -128,6 +242,12 @@ def normalize(raw, now):
                 "external_id": raw["id"],
                 "payment_model": raw.get("payment_model"),
                 "monetary_value_available": amount is not None,
+                "spend_category": category(raw),
+                "parent_subscription_id": raw.get("parent_subscription_id"),
+                "classic_subscription_id": raw.get("classic_subscription_id"),
+                "organization_id": raw.get("organization_id"),
+                "subscribed_service_id": raw.get("subscribed_service_id"),
+                "order_line_id": raw.get("order_line_id"),
                 "source_evidence": raw,
             },
         )
@@ -135,9 +255,11 @@ def normalize(raw, now):
         return None
 
 
-def _facts(rows, db):
-    resources = {r.ocid: r for r in db.query(Resource).all()}
-    rules = load_enabled_rules(db)
+def _facts(rows, db, enrich_resources=True):
+    resources = (
+        {r.ocid: r for r in db.query(Resource).all()} if enrich_resources else {}
+    )
+    rules = load_enabled_rules(db) if enrich_resources else []
     facts = defaultdict(Decimal)
     for item in rows:
         currency = str(item.get("currency") or "").strip().upper()
@@ -153,7 +275,7 @@ def _facts(rows, db):
             currency,
             item.get("region") or (model.region if model else None),
             item.get("service") or "Unattributed",
-            model.compartment_id if model else None,
+            model.compartment_id if model else item.get("compartment_id"),
             allocation.team if allocation else None,
             allocation.app if allocation else None,
             allocation.env if allocation else None,
@@ -216,7 +338,10 @@ def sync(db):
             raw, reports = discover(
                 get_oci_client(), subscription_ids=[sid for sid in manual_ids if sid]
             )
-            for item in raw:
+            candidates = [
+                candidate for item in raw for candidate in term_candidates(item)
+            ]
+            for item in candidates:
                 values = normalize(item, now)
                 if not values:
                     reports[f"normalization:{item.get('id', 'unknown')}"] = {
@@ -248,12 +373,26 @@ def sync(db):
         today = now.date()
         contracts = (
             db.query(SubscriptionContract)
-            .filter(SubscriptionContract.start_date <= today)
+            .filter(
+                SubscriptionContract.start_date <= today,
+                SubscriptionContract.end_date > today,
+                SubscriptionContract.total_value > 0,
+            )
             .all()
         )
         # Fetch each calendar window once, shared by overlapping contracts. Chunk to meet OCI range limits.
         monthly_facts = {}
+        retention_start = month_at(today.replace(day=1), -12)
+        detail_facts = {}
         for contract in contracts:
+            if not spend_eligible(contract) or contract.status.lower() in {
+                "expired",
+                "cancelled",
+                "canceled",
+                "terminated",
+                "inactive",
+            }:
+                continue
             left = contract.start_date.replace(day=1)
             while left < min(contract.end_date, today + timedelta(days=1)):
                 right = min(month_at(left, 1), today + timedelta(days=1))
@@ -273,15 +412,21 @@ def sync(db):
                     )
                     if saved and (saved.details or {}).get("complete"):
                         monthly_facts[key] = saved.details.get("facts", [])
+                if key not in monthly_facts and right <= retention_start:
+                    monthly_facts[key] = None
+                    reports[f"oci:usage/history:{left}"] = {
+                        "status": "outside_retention",
+                        "error": "Outside the 13-month Usage API window with no complete saved snapshot; historical spend remains unknown, not zero.",
+                    }
                 if key not in monthly_facts:
                     try:
                         rows = calc.get_usage_summary(
                             datetime.combine(left, datetime.min.time(), UTC),
                             datetime.combine(right, datetime.min.time(), UTC),
                             granularity="DAILY",
-                            group_by=["resourceId", "service", "region"],
+                            group_by=["service", "compartmentId", "region"],
                         )
-                        monthly_facts[key] = _facts(rows, db)
+                        monthly_facts[key] = _facts(rows, db, enrich_resources=False)
                     except Exception as exc:
                         logger.exception(
                             "subscription_usage_failed sync_id=%s start=%s",
@@ -322,6 +467,29 @@ def sync(db):
                         for row in all_facts
                         if start.isoformat() <= row["date"] < end.isoformat()
                     ]
+                    breakdown_facts = None
+                    if start <= today < end:
+                        detail_key = (start, min(end, today + timedelta(days=1)))
+                        if detail_key not in detail_facts:
+                            try:
+                                rows = calc.get_usage_summary(
+                                    datetime.combine(
+                                        detail_key[0], datetime.min.time(), UTC
+                                    ),
+                                    datetime.combine(
+                                        detail_key[1], datetime.min.time(), UTC
+                                    ),
+                                    granularity="MONTHLY",
+                                    group_by=["resourceId", "service", "region"],
+                                )
+                                detail_facts[detail_key] = _facts(rows, db)
+                            except Exception as exc:
+                                detail_facts[detail_key] = None
+                                reports[f"oci:usage/detail:{start}"] = {
+                                    "status": "unavailable",
+                                    "error": redact_sensitive(str(exc))[:4000],
+                                }
+                        breakdown_facts = detail_facts[detail_key]
                     actual = (
                         sum(
                             (
@@ -334,6 +502,21 @@ def sync(db):
                         if complete
                         else None
                     )
+                    if breakdown_facts is not None and actual is not None:
+                        detailed_actual = sum(
+                            (
+                                D(row["amount"])
+                                for row in breakdown_facts
+                                if row["currency"] == contract.currency
+                            ),
+                            Decimal(0),
+                        )
+                        if abs(detailed_actual - actual) > Decimal("0.01"):
+                            reports[f"oci:usage/detail-reconciliation:{start}"] = {
+                                "status": "incomplete",
+                                "error": "Resource breakdown does not reconcile with service aggregates for this window/currency; team chart withheld.",
+                            }
+                            breakdown_facts = None
                     elapsed = max(1, (min(end, today + timedelta(days=1)) - start).days)
                     pid = hashlib.sha256(
                         f"{contract.id}:{mode}:{start}".encode()
@@ -359,6 +542,9 @@ def sync(db):
                     period.computed_at = now
                     period.details = {
                         "facts": facts,
+                        "breakdown_facts": breakdown_facts,
+                        "detail_granularity": "MONTHLY",
+                        "summary_granularity": "DAILY service/compartment/region",
                         "complete": complete,
                         "elapsed_days": elapsed,
                         "actual_basis": "OCI Usage API tenancy spend; not contract-attributed",
@@ -373,7 +559,7 @@ def sync(db):
                     now.replace(day=1),
                     now + timedelta(days=1),
                     granularity="MONTHLY",
-                    group_by=["service"],
+                    group_by=None,
                     query_type=kind,
                 )
                 totals = defaultdict(Decimal)
@@ -402,6 +588,7 @@ def sync(db):
                     "forbidden_or_not_found",
                     "incomplete",
                     "needs_identifier",
+                    "outside_retention",
                 }
                 for value in reports.values()
             )

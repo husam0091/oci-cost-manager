@@ -116,6 +116,11 @@ def discover(client, subscription_ids=None):
         )
     )
     identifiers = list(dict.fromkeys([*identifiers, *(subscription_ids or [])]))
+    organizations = {
+        str(row.get("subscription_number") or row.get("classic_subscription_id")): row
+        for row in contracts
+        if row.get("subscription_number") or row.get("classic_subscription_id")
+    }
     one = []
     for sid in identifiers:
         rows = call(
@@ -127,7 +132,17 @@ def discover(client, subscription_ids=None):
             subscription_id=sid,
             is_commit_info_required=True,
         )
-        one.extend({**row, "id": sid} for row in rows)
+        org_row = organizations.get(sid, {})
+        one.extend(
+            {
+                **row,
+                "id": sid,
+                "classic_subscription_id": sid,
+                "organization_id": org_row.get("id"),
+                "organization_service_name": org_row.get("service_name"),
+            }
+            for row in rows
+        )
     if not identifiers:
         reports["oci:onesubscription/subscriptions"] = {
             "status": "needs_identifier",

@@ -463,6 +463,7 @@ def test_source_discovery_uses_real_sdk_signatures_and_independent_results(monke
             return NS(data=[{"id": "svc"}], headers={})
 
         def list_commitments(self, subscribed_service_id, compartment_id, **kwargs):
+            assert subscribed_service_id == "svc"
             return NS(data=[{"id": "commit"}], headers={})
 
         def list_billing_schedules(self, compartment_id, subscription_id, **kwargs):
@@ -571,3 +572,385 @@ def test_contract_renewals_do_not_reuse_previous_term_periods():
     )
     assert first["id"] != renewed["id"]
     assert first["term_months"] == renewed["term_months"] == 12
+
+
+def test_auto_renewing_parent_expands_all_service_terms_without_parent_end():
+    from services.commitments import term_candidates
+
+    parent = dict(
+        id="classic-fixture",
+        classic_subscription_id="classic-fixture",
+        organization_id="org-cloudcm",
+        organization_service_name="CLOUDCM",
+        service_name="Universal Credits",
+        source="oci:onesubscription",
+        time_start="2023-10-30",
+        time_end=None,
+        currency={"iso_code": "USD"},
+        subscribed_services=[
+            dict(
+                id="annual-order-line",
+                time_start="2026-01-23",
+                time_end="2027-01-22",
+                total_value="1710000",
+                status="ACTIVE",
+            ),
+            dict(
+                id="zero-addendum",
+                time_start="2026-09-10",
+                time_end="2027-01-22",
+                total_value="0",
+                status="ACTIVE",
+            ),
+            dict(
+                id="expired",
+                time_start="2025-09-10",
+                time_end="2026-09-09",
+                total_value="408500",
+                status="EXPIRED",
+            ),
+        ],
+    )
+    values = [normalize(row, datetime.now(UTC)) for row in term_candidates(parent)]
+    assert len(values) == 3 and all(values)
+    assert [row["total_value"] for row in values] == [
+        Decimal("1710000"),
+        Decimal(0),
+        Decimal("408500"),
+    ]
+    assert values[0]["start_date"] == date(2026, 1, 23)
+    assert values[0]["details"]["classic_subscription_id"] == "classic-fixture"
+    assert values[0]["details"]["organization_id"] == "org-cloudcm"
+    assert values[0]["details"]["spend_category"] == "oci_infrastructure"
+    assert "term 2026" in values[0]["name"]
+
+
+def test_detailed_service_identifier_is_not_an_embedded_order_line():
+    from services.commitments import term_candidates
+
+    parent = dict(
+        id="parent",
+        source="oci:onesubscription",
+        service_name="Universal Credits",
+        currency={"iso_code": "USD"},
+        time_end=None,
+        subscribed_services=[
+            dict(
+                id="123",
+                time_start="2026-01-23",
+                time_end="2027-01-22",
+                total_value="1710000",
+            )
+        ],
+        services=[
+            dict(
+                id="service-ocid",
+                order_line_id=123,
+                time_start="2026-01-23",
+                time_end="2027-01-22",
+                status="ACTIVE",
+            )
+        ],
+    )
+    candidates = term_candidates(parent)
+    assert len(candidates) == 1
+    values = normalize(candidates[0], datetime.now(UTC))
+    assert values["details"]["subscribed_service_id"] == "service-ocid"
+    assert str(values["details"]["order_line_id"]) == "123"
+    assert values["total_value"] == 1710000
+
+
+@pytest.mark.parametrize("query_type", ["CREDIT", "EXPIREDCREDIT", "ALLCREDIT"])
+def test_credit_queries_have_null_grouping_even_if_caller_supplies_grouping(query_type):
+    requests = []
+
+    def request(details, **kwargs):
+        requests.append(details)
+        return NS(data=NS(items=[NS(computed_amount=-10, currency="USD")]), headers={})
+
+    calc = CostCalculatorService.__new__(CostCalculatorService)
+    calc.oci_client = NS(
+        tenancy_id="tenancy", usage_client=NS(request_summarized_usages=request)
+    )
+    result = calc.get_usage_summary(
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 2, 1, tzinfo=UTC),
+        query_type=query_type,
+        group_by=["service"],
+    )
+    assert requests[0].group_by is None
+    assert result[0]["computed_amount"] == -10
+    assert result[0]["quantity"] is None
+
+
+def test_default_uses_active_positive_infrastructure_term_not_saas_or_addendum(api):
+    client, db, _ = api
+    now = datetime.now(UTC)
+    start = now.date().replace(day=1)
+    end = month_at(start, 12)
+    for identity, name, value, offset in [
+        ("uc", "Universal Credits", 1710000, 0),
+        ("addendum", "Universal Credits", 0, 1),
+        ("saas", "Fusion HCM Cloud", 399600, 2),
+    ]:
+        db.add(
+            SubscriptionContract(
+                id=identity,
+                source="oci:onesubscription",
+                name=name,
+                status="ACTIVE",
+                start_date=start.replace(day=1 + offset),
+                end_date=end,
+                total_value=value,
+                currency="USD",
+                term_months=12,
+                computed_at=now,
+                details={"source_evidence": {"service_name": name}},
+            )
+        )
+    db.add(
+        SubscriptionPeriod(
+            id="wrong-saas-period",
+            contract_id="saas",
+            mode="subscription",
+            start_date=start,
+            end_date=month_at(start, 1),
+            allowance=100,
+            actual=900,
+            computed_at=now,
+            details={
+                "complete": True,
+                "elapsed_days": 10,
+                "facts": [
+                    dict(currency="USD", region="all", service="Compute", amount="900")
+                ],
+            },
+        )
+    )
+    db.commit()
+    assert (
+        client.get("/subscriptions/overview").json()["data"]["contract"]["id"] == "uc"
+    )
+    saas = client.get("/subscriptions/overview?contract_id=saas").json()["data"]
+    assert (
+        saas["consumed_to_date"] is None
+        and saas["utilisation_pct"] is None
+        and saas["periods"] == []
+    )
+    assert saas["contract"]["resource_usage_applicable"] is False
+    assert (
+        client.get("/subscriptions/breakdown?period=wrong-saas-period").status_code
+        == 422
+    )
+
+
+def test_sync_skips_expired_saas_zero_and_metadata_contracts_and_bounds_detail(
+    api, monkeypatch
+):
+    from services import commitments as service
+
+    client, db, _ = api
+    now = datetime.now(UTC)
+    start = now.date().replace(day=1)
+    end = month_at(start, 12)
+    for identity, name, value, left, right, status in [
+        ("uc", "Universal Credits", 1710000, start, end, "ACTIVE"),
+        ("zero", "Universal Credits", 0, start, end, "ACTIVE"),
+        ("saas", "Fusion HCM Cloud", 399600, date(2024, 11, 30), end, "ACTIVE"),
+        (
+            "expired",
+            "Universal Credits",
+            100,
+            date(2023, 10, 30),
+            date(2024, 10, 30),
+            "EXPIRED",
+        ),
+        ("metadata", "CLOUDCM", None, start, end, "ACTIVE"),
+    ]:
+        db.add(
+            SubscriptionContract(
+                id=identity,
+                source="oci:onesubscription",
+                name=name,
+                status=status,
+                start_date=left,
+                end_date=right,
+                total_value=value,
+                currency="USD",
+                term_months=12,
+                computed_at=now,
+                details={"source_evidence": {"service_name": name}},
+            )
+        )
+    db.commit()
+    monkeypatch.setattr(service, "get_oci_client", lambda: NS())
+    monkeypatch.setattr(service, "discover", lambda *a, **k: ([], {}))
+    calls = []
+
+    def usage(*args, **kwargs):
+        calls.append((args, kwargs))
+        if kwargs.get("query_type"):
+            return []
+        return [
+            dict(
+                time_usage_started=start.isoformat(),
+                currency="USD",
+                service="Compute",
+                compartment_id="comp",
+                region="fixture",
+                computed_amount=10,
+            )
+        ]
+
+    monkeypatch.setattr(
+        service, "get_cost_calculator", lambda: NS(get_usage_summary=usage)
+    )
+    service.sync(db)
+    costs = [(args, kw) for args, kw in calls if not kw.get("query_type")]
+    assert (
+        len(costs) == 2
+    )  # one daily aggregate and one shared active-window detail request
+    assert all(args[0].date() >= start for args, _ in costs)
+    assert all(
+        kw["granularity"] == "MONTHLY"
+        for _, kw in costs
+        if "resourceId" in kw["group_by"]
+    )
+    assert all(
+        kw["group_by"] == ["service", "compartmentId", "region"]
+        for _, kw in costs
+        if kw["granularity"] == "DAILY"
+    )
+    assert {row.contract_id for row in db.query(SubscriptionPeriod)} == {"uc"}
+    assert (
+        client.get("/subscriptions/overview").json()["data"]["consumed_to_date"] == 10
+    )
+
+
+def test_retention_skips_old_api_calls_without_reporting_partial_history_as_total(
+    api, monkeypatch
+):
+    from services import commitments as service
+
+    client, db, _ = api
+    now = datetime.now(UTC)
+    anchor = now.date().replace(day=1)
+    db.add(
+        SubscriptionContract(
+            id="long-manual",
+            source="manual",
+            name="Long credits",
+            status="active",
+            start_date=month_at(anchor, -18),
+            end_date=month_at(anchor, 6),
+            total_value=24000,
+            currency="USD",
+            term_months=24,
+            computed_at=now,
+            details={},
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(service, "get_oci_client", lambda: NS())
+    monkeypatch.setattr(service, "discover", lambda *a, **k: ([], {}))
+    starts = []
+
+    def usage(*args, **kwargs):
+        if not kwargs.get("query_type"):
+            starts.append(args[0].date())
+        return []
+
+    monkeypatch.setattr(
+        service, "get_cost_calculator", lambda: NS(get_usage_summary=usage)
+    )
+    result = service.sync(db)
+    assert min(starts) >= month_at(anchor, -12)
+    assert result["status"] == "partial"
+    assert any(
+        row.get("status") == "outside_retention" for row in result["sources"].values()
+    )
+    overview = client.get("/subscriptions/overview?contract_id=long-manual").json()[
+        "data"
+    ]
+    assert (
+        overview["consumed_to_date"] is None and overview["forecast_term_end"] is None
+    )
+    assert any(
+        not row["complete"] and row["actual"] is None for row in overview["periods"]
+    )
+
+
+def test_january_23_anniversary_and_exact_term_spend_start(api, monkeypatch):
+    from services import commitments as service
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 17, tzinfo=UTC)
+
+    monkeypatch.setattr(service, "datetime", FixedDateTime)
+    client, db, _ = api
+    db.add(
+        SubscriptionContract(
+            id="annual-jan23",
+            source="oci:onesubscription",
+            name="Universal Credits, term 2026",
+            status="ACTIVE",
+            start_date=date(2026, 1, 23),
+            end_date=date(2027, 1, 23),
+            total_value=1710000,
+            currency="USD",
+            term_months=12,
+            computed_at=datetime.now(UTC),
+            details={"source_evidence": {"service_name": "Universal Credits"}},
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(service, "get_oci_client", lambda: NS())
+    monkeypatch.setattr(service, "discover", lambda *a, **k: ([], {}))
+
+    def usage(start, end, **kwargs):
+        if kwargs.get("query_type"):
+            return []
+        if kwargs["granularity"] == "MONTHLY":
+            return []  # no reconciled resource detail in this fixture
+        if start.month != 1:
+            return []
+        return [
+            dict(
+                time_usage_started="2026-01-01",
+                currency="USD",
+                service="Compute",
+                computed_amount=100,
+            ),
+            dict(
+                time_usage_started="2026-01-23",
+                currency="USD",
+                service="Compute",
+                computed_amount=20,
+            ),
+        ]
+
+    monkeypatch.setattr(
+        service, "get_cost_calculator", lambda: NS(get_usage_summary=usage)
+    )
+    service.sync(db)
+    active = (
+        db.query(SubscriptionPeriod)
+        .filter_by(
+            contract_id="annual-jan23",
+            mode="subscription",
+            start_date=date(2026, 9, 23),
+        )
+        .one()
+    )
+    assert active.end_date == date(2026, 10, 23)  # 22 October inclusive
+    assert (
+        sum(
+            row.actual
+            for row in db.query(SubscriptionPeriod).filter_by(
+                contract_id="annual-jan23", mode="subscription"
+            )
+        )
+        == 20
+    )

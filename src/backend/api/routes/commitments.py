@@ -20,7 +20,7 @@ from core.models import (
     Compartment,
 )
 from core.rbac import resolve_principal
-from services.commitments import D, queue_sync, month_at
+from services.commitments import D, queue_sync, month_at, category, spend_eligible
 from services.subscription_sources import POLICIES
 
 router = APIRouter()
@@ -66,6 +66,15 @@ def contract_json(row):
         "computed_at": row.computed_at.isoformat(),
         "manual": row.source == "manual",
         "payment_model": (row.details or {}).get("payment_model"),
+        "spend_category": (
+            "oci_infrastructure"
+            if row.source == "manual"
+            else category((row.details or {}).get("source_evidence") or {})
+        ),
+        "resource_usage_applicable": spend_eligible(row),
+        "parent_subscription_id": (row.details or {}).get("parent_subscription_id"),
+        "classic_subscription_id": (row.details or {}).get("classic_subscription_id"),
+        "subscribed_service_id": (row.details or {}).get("subscribed_service_id"),
     }
 
 
@@ -240,17 +249,35 @@ def period_json(row, currency, region):
 
 
 def view(db, contract_id, mode, region, principal):
-    contract = (
-        db.get(SubscriptionContract, contract_id)
-        if contract_id
-        else db.query(SubscriptionContract)
-        .filter(
-            SubscriptionContract.start_date <= date.today(),
-            SubscriptionContract.end_date > date.today(),
+    if contract_id:
+        contract = db.get(SubscriptionContract, contract_id)
+    else:
+        candidates = (
+            db.query(SubscriptionContract)
+            .filter(
+                SubscriptionContract.start_date <= date.today(),
+                SubscriptionContract.end_date > date.today(),
+            )
+            .all()
         )
-        .order_by(SubscriptionContract.start_date.desc())
-        .first()
-    )
+        candidates = [
+            row
+            for row in candidates
+            if spend_eligible(row)
+            and row.total_value is not None
+            and row.total_value > 0
+            and row.status.lower()
+            not in {"expired", "cancelled", "canceled", "terminated", "inactive"}
+        ]
+        contract = max(
+            candidates,
+            key=lambda row: (
+                row.source == "oci:onesubscription",
+                row.status.lower() == "active",
+                row.start_date,
+            ),
+            default=None,
+        )
     if not contract:
         return {
             "contract": None,
@@ -272,7 +299,7 @@ def view(db, contract_id, mode, region, principal):
     )
     revision = [sync_revision.id, sync_revision.status] if sync_revision else None
     key = (
-        "commitments_"
+        "commitments_terms_v2_"
         + hashlib.sha256(
             json.dumps(
                 [
@@ -291,11 +318,16 @@ def view(db, contract_id, mode, region, principal):
     cached = get_cached(key)
     if cached is not None:
         return cached
+    applicable = spend_eligible(contract)
     models = (
-        db.query(SubscriptionPeriod)
-        .filter_by(contract_id=contract.id, mode=mode)
-        .order_by(SubscriptionPeriod.start_date)
-        .all()
+        (
+            db.query(SubscriptionPeriod)
+            .filter_by(contract_id=contract.id, mode=mode)
+            .order_by(SubscriptionPeriod.start_date)
+            .all()
+        )
+        if applicable
+        else []
     )
     periods = [period_json(row, contract.currency, region) for row in models]
     today = datetime.now(UTC).date()
@@ -337,6 +369,10 @@ def view(db, contract_id, mode, region, principal):
             / 3600,
         )
     alerts = []
+    if not applicable:
+        alerts.append(
+            "OCI infrastructure spend does not apply to this SaaS or unclassified contract. No consumption or utilisation is calculated."
+        )
     if total and forecast is not None and forecast > total * D("1.05"):
         alerts.append("Forecast exceeds commitment by more than 5% (linear estimate).")
     if (
@@ -476,8 +512,14 @@ def breakdown(
     row = db.get(SubscriptionPeriod, period)
     if not row:
         raise HTTPException(404, "Period not found")
+    contract = db.get(SubscriptionContract, row.contract_id)
+    if not spend_eligible(contract):
+        raise HTTPException(
+            422,
+            "OCI resource spend does not apply to this SaaS or unclassified contract",
+        )
     cache_key = (
-        "commitment_breakdown_"
+        "commitment_breakdown_terms_v2_"
         + hashlib.sha256(
             json.dumps(
                 [principal.username, period, group_by, region, str(row.computed_at)]
@@ -494,7 +536,13 @@ def breakdown(
         else {}
     )
     totals = {}
-    for fact in (row.details or {}).get("facts", []):
+    detail = row.details or {}
+    facts = detail.get("facts", [])
+    complete = detail.get("complete", False)
+    if group_by == "team" and "breakdown_facts" in detail:
+        facts = detail.get("breakdown_facts") or []
+        complete = complete and detail.get("breakdown_facts") is not None
+    for fact in facts:
         if fact["currency"] != contract.currency or (
             region and region != "all" and fact["region"] != region
         ):
@@ -520,7 +568,7 @@ def breakdown(
         ],
         "meta": {
             "currency": contract.currency,
-            "complete": (row.details or {}).get("complete", False),
+            "complete": complete,
             "basis": "Actual consumption / whole monthly allowance; not an assigned team budget",
             "source": "OCI Usage API COST",
         },

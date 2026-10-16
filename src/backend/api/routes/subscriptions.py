@@ -8,7 +8,7 @@ from core.database import get_db
 from core.models import SubscriptionContract
 from api.routes.commitments import authorize, contract_json
 from services.cost_calculator import get_cost_calculator
-from services.commitments import D
+from services.commitments import D, spend_eligible
 from core.cache import get_cached, set_cached
 
 router = APIRouter()
@@ -29,7 +29,14 @@ def get_subscriptions(
         )
         .all()
     )
-    key = f"subscriptions_v4_{principal.username}_{now:%Y-%m-%d_%H}_{max((str(r.computed_at) for r in rows), default='empty')}"
+    rows = [
+        row
+        for row in rows
+        if spend_eligible(row)
+        and row.status.lower()
+        not in {"expired", "cancelled", "canceled", "terminated", "inactive"}
+    ]
+    key = f"subscriptions_terms_v5_{principal.username}_{now:%Y-%m-%d_%H}_{max((str(r.computed_at) for r in rows), default='empty')}"
     cached = get_cached(key)
     if cached is not None:
         return {"success": True, "data": cached, "cached": True}
@@ -52,7 +59,10 @@ def get_subscriptions(
         error = "Usage unavailable; see billing diagnostics"
         totals = {}
     # Multiple overlapping contracts cannot be added automatically, even in the same currency.
-    single = rows[0] if len(rows) == 1 else None
+    monetary = [
+        row for row in rows if row.total_value is not None and row.total_value > 0
+    ]
+    single = monetary[0] if len(monetary) == 1 else None
     currency = (
         single.currency
         if single

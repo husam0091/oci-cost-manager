@@ -93,11 +93,12 @@ class CostCalculatorService:
             time_usage_ended=end_date,
             granularity=granularity,
             query_type=query_type,
-            group_by=list(dict.fromkeys([*(group_by or ["service", "skuName"]), "currency"])),
+            group_by=(None if query_type in {"CREDIT", "EXPIREDCREDIT", "ALLCREDIT"}
+                      else list(dict.fromkeys([*(group_by if group_by is not None else ["service", "skuName"]), "currency"]))),
             compartment_depth=6,
         )
 
-        if len(request_details.group_by) > 4:
+        if len(request_details.group_by or []) > 4:
             raise ValueError("OCI supports at most four grouping dimensions, including currency")
 
         # Build dimension filters (region and/or compartment)
@@ -161,7 +162,7 @@ class CostCalculatorService:
                 "quantity": (
                     float(item.computed_quantity) if getattr(item, "computed_quantity", None) is not None
                     else None
-                ) if "unit" in request_details.group_by else None,
+                ) if "unit" in (request_details.group_by or []) else None,
                 "unit": getattr(item, "unit", None),
                 "computed_amount": cost,
                 "currency": getattr(item, "currency", "USD"),
