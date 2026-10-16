@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 @router.get("/resources")
-async def data_resources(
+def data_resources(
     compartment_id: Optional[str] = Query(None),
     type: Optional[str] = Query(None, description="resource type filter"),
     env: Optional[str] = Query(None),
@@ -91,7 +91,7 @@ async def data_resources(
 
 
 @router.get("/compartments/tree")
-async def data_compartments_tree(db: Session = Depends(get_db)):
+def data_compartments_tree(db: Session = Depends(get_db)):
     rows = db.query(Compartment).all()
     if not rows:
         return {"success": True, "data": None}
@@ -108,7 +108,7 @@ async def data_compartments_tree(db: Session = Depends(get_db)):
 
 
 @router.get("/costs")
-async def data_costs(period: str = Query("monthly"), db: Session = Depends(get_db)):
+def data_costs(period: str = Query("monthly"), db: Session = Depends(get_db)):
     row = db.query(CostSnapshot).filter(CostSnapshot.period == period).order_by(CostSnapshot.start_date.desc()).first()
     if not row:
         return {"success": True, "data": None}
@@ -122,9 +122,27 @@ async def data_costs(period: str = Query("monthly"), db: Session = Depends(get_d
 
 
 @router.get("/trends")
-async def data_trends(months: int = Query(6, ge=1, le=24), db: Session = Depends(get_db)):
+def data_trends(months: int = Query(6, ge=1, le=24), db: Session = Depends(get_db)):
     rows = db.query(TrendPoint).order_by(TrendPoint.month_start.desc()).limit(months).all()
     out = [{
         "month": r.month, "month_name": r.month, "total_cost": r.total_cost, "by_service": r.by_service or {}
     } for r in reversed(rows)]
     return {"success": True, "data": out}
+
+
+@router.get("/resource-counts")
+def resource_counts(
+    compartment_id: Optional[str] = Query(None),
+    region: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import func
+    q = db.query(Resource.type, func.count(Resource.id))
+    if compartment_id:
+        q = q.filter(Resource.compartment_id == compartment_id)
+    if region and region != "all":
+        q = q.filter(Resource.region == region)
+    rows = q.group_by(Resource.type).all()
+    counts = {type_ or "unknown": count for type_, count in rows}
+    counts["all"] = sum(count for _, count in rows)
+    return {"success": True, "data": counts}

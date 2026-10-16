@@ -39,7 +39,7 @@ def _create_job(db: Session, job_type: str, params: dict) -> JobRun:
 
 
 @router.post("/diagnostics_refresh", status_code=status.HTTP_202_ACCEPTED)
-async def create_diagnostics_refresh_job(body: JobCreateRequest, request: Request, db: Session = Depends(get_db)):
+def create_diagnostics_refresh_job(body: JobCreateRequest, request: Request, db: Session = Depends(get_db)):
     corr = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     params = {**(body.params or {}), "correlation_id": corr}
     job = _create_job(db, "diagnostics_refresh", params)
@@ -50,7 +50,7 @@ async def create_diagnostics_refresh_job(body: JobCreateRequest, request: Reques
 
 
 @router.post("/{job_type}", status_code=status.HTTP_202_ACCEPTED)
-async def create_job(job_type: str, body: JobCreateRequest, request: Request, db: Session = Depends(get_db)):
+def create_job(job_type: str, body: JobCreateRequest, request: Request, db: Session = Depends(get_db)):
     if job_type not in ALLOWED_JOB_TYPES:
         raise HTTPException(status_code=404, detail="Unsupported job type")
     corr = request.headers.get("x-correlation-id") or str(uuid.uuid4())
@@ -64,7 +64,7 @@ async def create_job(job_type: str, body: JobCreateRequest, request: Request, db
 
 
 @router.get("/summary")
-async def get_jobs_summary(db: Session = Depends(get_db)):
+def get_jobs_summary(db: Session = Depends(get_db)):
     rows = db.query(JobRun).all()
     status_counts: dict[str, int] = {}
     worker_busy = False
@@ -90,7 +90,7 @@ async def get_jobs_summary(db: Session = Depends(get_db)):
 
 
 @router.get("/{job_id}")
-async def get_job(job_id: str, db: Session = Depends(get_db)):
+def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.query(JobRun).filter(JobRun.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -110,7 +110,7 @@ async def get_job(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{job_id}/result")
-async def get_job_result(job_id: str, db: Session = Depends(get_db)):
+def get_job_result(job_id: str, db: Session = Depends(get_db)):
     job = db.query(JobRun).filter(JobRun.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")

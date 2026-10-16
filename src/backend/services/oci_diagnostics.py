@@ -21,7 +21,7 @@ DIAG_CACHE_TTL_SECONDS = 300
 
 def _minimal_unknown(message: str = "Diagnostics unavailable") -> dict[str, Any]:
     return {
-        "status": "degraded",
+        "status": "unknown",
         "checks": {
             "config_detected": False,
             "key_readable": False,
@@ -33,7 +33,7 @@ def _minimal_unknown(message: str = "Diagnostics unavailable") -> dict[str, Any]
         "last_sync_time": None,
         "checked_at": datetime.now(UTC).isoformat(),
         "message": message,
-        "mode": "degraded",
+        "mode": "unknown",
     }
 
 
@@ -151,18 +151,16 @@ def key_readable(key_file: str | None, key_content: str | None) -> bool:
 def ensure_degraded_if_stale(data: dict[str, Any], db: Session, stale_hours: int = 24) -> dict[str, Any]:
     last_sync = _snapshot_last_sync(db)
     if not last_sync:
-        data["status"] = "degraded"
-        data["mode"] = "degraded"
-        data["message"] = "Using last available snapshot"
+        data["data_freshness"] = "not_synced"
+        data["message"] = "No cost snapshot yet; connection health is independent of inventory/billing sync"
         data["last_sync_time"] = None
         return data
     if last_sync.tzinfo is None:
         last_sync = last_sync.replace(tzinfo=UTC)
     data["last_sync_time"] = last_sync.isoformat()
     if datetime.now(UTC) - last_sync > timedelta(hours=stale_hours):
-        data["status"] = "degraded"
-        data["mode"] = "degraded"
-        data["message"] = "Last sync is stale; using last available snapshot"
+        data["data_freshness"] = "stale"
+        data["message"] = "Last data sync is stale; this does not change the stored OCI connection check"
     return data
 
 
@@ -175,5 +173,5 @@ def get_diagnostics_response(db: Session) -> tuple[dict[str, Any], str]:
         latest = ensure_degraded_if_stale(latest, db)
         cache_set_diagnostics(latest)
         return latest, "db"
-    fallback = ensure_degraded_if_stale(_minimal_unknown("Using cached diagnostics"), db)
+    fallback = ensure_degraded_if_stale(_minimal_unknown("Diagnostics have not been run; refresh diagnostics to check OCI connectivity"), db)
     return fallback, "unknown"

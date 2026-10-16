@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 @router.get("")
-async def get_cache_status():
+def get_cache_status():
     """Get cache status and entries."""
     return {
         "success": True,
@@ -19,7 +19,7 @@ async def get_cache_status():
 
 
 @router.delete("")
-async def clear_all_cache():
+def clear_all_cache():
     """Clear all cached data."""
     clear_cache()
     return {
@@ -29,7 +29,7 @@ async def clear_all_cache():
 
 
 @router.delete("/{cache_key}")
-async def clear_cache_key(cache_key: str):
+def clear_cache_key(cache_key: str):
     """Clear specific cache key."""
     clear_cache(cache_key)
     return {
@@ -39,7 +39,7 @@ async def clear_cache_key(cache_key: str):
 
 
 @router.post("/bust")
-async def bust_cache(request: Request):
+def bust_cache(request: Request):
     """Bust all phase-3 cost cache keys."""
     correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     cache_delete_prefix("cost:")

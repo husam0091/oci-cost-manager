@@ -25,5 +25,5 @@ git fetch origin "$branch"
 git merge --ff-only "origin/$branch"
 export BUILD_SHA="$(git rev-parse --short HEAD)"
 "$engine" compose up -d --build backend worker frontend
-printf '\nUpdated %s at %s. Check the footer for Interface 2.1.0.\n' "$branch" "$BUILD_SHA"
+printf '\nUpdated %s at %s. Check the footer for Interface 2.2.0.\n' "$branch" "$BUILD_SHA"
 printf 'Verify frontend build: curl -fsS http://localhost:8080/release.json\n'

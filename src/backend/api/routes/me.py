@@ -9,7 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core.config import get_settings as get_app_settings
-from core.database import ensure_settings_schema, get_db
+from core.database import get_db
 from core.models import Budget, ScanRun, Setting, UserAccount
 from core.rbac import feature_flags, resolve_principal, role_job_profile
 
@@ -17,11 +17,10 @@ router = APIRouter()
 
 
 @router.get("/me")
-async def me(
+def me(
     token: Optional[str] = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
 ):
-    ensure_settings_schema()
     # If users exist in the DB, require a valid JWT so the login page is shown
     has_users = db.query(UserAccount).filter(UserAccount.is_active == True).count() > 0
     strict = has_users

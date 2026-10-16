@@ -58,7 +58,7 @@ def _rate_limit(user_key: str) -> None:
 
 
 @router.post("/settings/oci")
-async def save_oci_settings(req: OciMetadataRequest, request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def save_oci_settings(req: OciMetadataRequest, request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
     actor = user.get("sub") or "admin"
     row = upsert_oci_metadata(
         db,
@@ -111,7 +111,7 @@ async def rotate_oci_key(request: Request, key_file: UploadFile = File(...), db:
 
 
 @router.post("/settings/oci/test")
-async def test_oci_settings(request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def test_oci_settings(request: Request, db: Session = Depends(get_db), user=Depends(_require_admin)):
     user_key = user.get("sub") or "admin"
     _rate_limit(user_key)
     row = db.query(OciIntegration).order_by(OciIntegration.id.desc()).first()

@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 @router.get("/ops/metrics")
-async def ops_metrics(db: Session = Depends(get_db)):
+def ops_metrics(db: Session = Depends(get_db)):
     ensure_settings_schema()
     app_settings = get_app_settings()
     scan_count = db.query(func.count(ScanRun.id)).scalar() or 0

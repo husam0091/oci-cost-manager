@@ -291,7 +291,7 @@ def _legacy_snapshot_fallback(db: Session, section: str) -> tuple[dict | list | 
 
 
 @router.get("/summary")
-async def cost_summary(
+def cost_summary(
     range: str = Query("prev_month", pattern="^(prev_month|ytd|prev_year)$"),
     scope: str | None = Query(None),
     db: Session = Depends(get_db),
@@ -325,7 +325,7 @@ async def cost_summary(
 
 
 @router.get("/by-service")
-async def cost_by_service(
+def cost_by_service(
     range: str = Query("prev_month", pattern="^(prev_month|ytd|prev_year)$"),
     limit: int = Query(20, ge=1, le=200),
     scope: str | None = Query(None),
@@ -354,7 +354,7 @@ async def cost_by_service(
 
 
 @router.get("/by-compartment")
-async def cost_by_compartment(
+def cost_by_compartment(
     range: str = Query("prev_month", pattern="^(prev_month|ytd|prev_year)$"),
     limit: int = Query(50, ge=1, le=500),
     scope: str | None = Query(None),
@@ -383,7 +383,7 @@ async def cost_by_compartment(
 
 
 @router.get("/by-resource")
-async def cost_by_resource(
+def cost_by_resource(
     range: str = Query("prev_month", pattern="^(prev_month|ytd|prev_year)$"),
     limit: int = Query(50, ge=1, le=500),
     scope: str | None = Query(None),

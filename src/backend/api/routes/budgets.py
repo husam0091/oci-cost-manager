@@ -58,7 +58,7 @@ def _to_budget_model(row: Budget) -> BudgetModel:
 
 
 @router.get("", response_model=BudgetListResponseModel)
-async def list_budgets(
+def list_budgets(
     token: Optional[str] = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
 ):
@@ -82,7 +82,7 @@ async def list_budgets(
 
 
 @router.post("", response_model=BudgetMutationResponseModel)
-async def create_budget(
+def create_budget(
     req: BudgetCreateUpdateModel,
     token: Optional[str] = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
@@ -117,7 +117,7 @@ async def create_budget(
 
 
 @router.put("/{budget_id}", response_model=BudgetMutationResponseModel)
-async def update_budget(
+def update_budget(
     budget_id: str,
     req: BudgetCreateUpdateModel,
     token: Optional[str] = Cookie(default=None, alias="access_token"),
@@ -154,7 +154,7 @@ async def update_budget(
 
 
 @router.delete("/{budget_id}", response_model=BudgetDeleteResponseModel)
-async def delete_budget(
+def delete_budget(
     budget_id: str,
     token: Optional[str] = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
@@ -173,7 +173,7 @@ async def delete_budget(
 
 
 @router.get("/status", response_model=BudgetStatusResponseModel)
-async def budget_status(
+def budget_status(
     token: Optional[str] = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
 ):
@@ -234,7 +234,7 @@ async def budget_status(
 
 
 @router.get("/history", response_model=BudgetHistoryResponseModel)
-async def budget_history(
+def budget_history(
     budget_id: str = Query(...),
     token: Optional[str] = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
@@ -282,7 +282,7 @@ class BudgetValidateRequest(BaseModel):
 
 
 @router.post("/validate")
-async def validate_budget(request: BudgetValidateRequest):
+def validate_budget(request: BudgetValidateRequest):
     try:
         validator = get_budget_validator()
         result = validator.validate_budget(
@@ -298,7 +298,7 @@ async def validate_budget(request: BudgetValidateRequest):
 
 
 @router.get("/check")
-async def quick_budget_check(
+def quick_budget_check(
     budget: float = Query(..., description="Budget amount"),
     period: str = Query("monthly", description="Period: monthly or yearly"),
 ):
@@ -322,7 +322,7 @@ async def quick_budget_check(
 
 
 @router.get("/forecast")
-async def get_budget_forecast(
+def get_budget_forecast(
     budget: float = Query(..., description="Budget amount"),
     period: str = Query("monthly", description="Period: monthly or yearly"),
 ):

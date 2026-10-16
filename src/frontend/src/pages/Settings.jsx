@@ -826,7 +826,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
             {scanRuns.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead><tr className="border-b border-slate-200"><th className="px-3 py-2 text-left">Run ID</th><th className="px-3 py-2 text-left">Status</th><th className="px-3 py-2 text-left">Started</th><th className="px-3 py-2 text-left">Finished</th><th className="px-3 py-2 text-left">Error</th></tr></thead>
+                  <thead><tr className="border-b border-slate-200"><th className="px-3 py-2 text-left">Run ID</th><th className="px-3 py-2 text-left">Status</th><th className="px-3 py-2 text-left">Started</th><th className="px-3 py-2 text-left">Finished</th><th className="px-3 py-2 text-left">Progress / notes</th></tr></thead>
                   <tbody>
                     {scanRuns.map((run) => (
                       <tr key={run.id} className="border-b border-slate-100">
@@ -834,7 +834,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
                         <td className="px-3 py-2">{run.status}</td>
                         <td className="px-3 py-2">{run.started_at ? new Date(run.started_at).toLocaleString() : '-'}</td>
                         <td className="px-3 py-2">{run.finished_at ? new Date(run.finished_at).toLocaleString() : '-'}</td>
-                        <td className="max-w-xs truncate px-3 py-2 text-xs text-rose-600">{run.error_message || '-'}</td>
+                        <td className={`max-w-md px-3 py-2 text-xs ${run.status === 'failed' ? 'text-rose-600' : run.status === 'partial' ? 'text-amber-700' : 'text-slate-500'}`}>{run.error_message || '-'}</td>
                       </tr>
                     ))}
                   </tbody>

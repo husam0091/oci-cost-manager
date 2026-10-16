@@ -73,7 +73,7 @@ def _leaf_meta(cert_pem: bytes) -> dict:
 
 
 @router.get("/settings/portal-ssl")
-async def get_portal_ssl_settings(db: Session = Depends(get_db), user=Depends(_require_admin)):
+def get_portal_ssl_settings(db: Session = Depends(get_db), user=Depends(_require_admin)):
     ensure_settings_schema()
     s = db.query(Setting).filter(Setting.id == 1).one_or_none()
     if not s:

@@ -85,7 +85,7 @@ def _serialize_log(row: LogEvent) -> dict[str, Any]:
 
 
 @router.post("/frontend")
-async def ingest_frontend_log(payload: FrontendLogIn, request: Request):
+def ingest_frontend_log(payload: FrontendLogIn, request: Request):
     correlation_id = payload.correlation_id or request.headers.get("x-correlation-id") or str(uuid.uuid4())
     level = payload.level.lower() if payload.level else "info"
     if level not in ALLOWED_LEVELS:
@@ -104,7 +104,7 @@ async def ingest_frontend_log(payload: FrontendLogIn, request: Request):
 
 
 @router.get("")
-async def list_logs(
+def list_logs(
     request: Request,
     db: Session = Depends(get_db),
     log_type: str | None = None,
@@ -176,7 +176,7 @@ def _get_timeline(correlation_id: str, db: Session) -> dict[str, Any]:
 
 
 @router.post("/export", status_code=status.HTTP_202_ACCEPTED)
-async def export_logs(payload: LogsExportRequest, request: Request, db: Session = Depends(get_db)):
+def export_logs(payload: LogsExportRequest, request: Request, db: Session = Depends(get_db)):
     correlation_id = request.headers.get("x-correlation-id") or str(uuid.uuid4())
     fmt = (payload.format or "json").lower()
     if fmt not in {"json", "csv"}:
@@ -203,7 +203,7 @@ async def export_logs(payload: LogsExportRequest, request: Request, db: Session 
 
 
 @router.get("/metrics/db")
-async def db_metrics():
+def db_metrics():
     database_url = os.getenv("DATABASE_URL", "")
     return {
         "success": True,
@@ -217,5 +217,5 @@ async def db_metrics():
 
 
 @router.get("/{correlation_id}")
-async def correlation_timeline(correlation_id: str, db: Session = Depends(get_db)):
+def correlation_timeline(correlation_id: str, db: Session = Depends(get_db)):
     return _get_timeline(correlation_id, db)

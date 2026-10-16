@@ -61,6 +61,7 @@ export default function Costs({
       resource_id: resource?.id,
       offset,
       limit: 100,
+      view: 'items',
       refresh: version > 0 && offset === 0
     }).then(r => {
       if (!cancelled) setReport(r.data);

@@ -68,7 +68,7 @@ def _to_action_model(row: ActionRequest) -> ActionRequestModel:
 
 
 @router.post("/actions", response_model=ActionCreateResponseModel)
-async def create_action_request(req: ActionCreateRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
+def create_action_request(req: ActionCreateRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
     ensure_settings_schema()
     ensure_action_tables(db)
     setting = db.query(Setting).filter(Setting.id == 1).one_or_none()
@@ -107,7 +107,7 @@ async def create_action_request(req: ActionCreateRequestModel, db: Session = Dep
 
 
 @router.get("/actions", response_model=ActionListResponseModel)
-async def list_actions(
+def list_actions(
     status: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     team: Optional[str] = Query(None),
@@ -154,7 +154,7 @@ async def list_actions(
 
 
 @router.get("/actions/{action_id}", response_model=ActionDetailResponseModel)
-async def get_action(action_id: str, db: Session = Depends(get_db), principal=Depends(_principal)):
+def get_action(action_id: str, db: Session = Depends(get_db), principal=Depends(_principal)):
     ensure_action_tables(db)
     action = db.query(ActionRequest).filter(ActionRequest.action_id == action_id).one_or_none()
     if not action:
@@ -192,7 +192,7 @@ async def get_action(action_id: str, db: Session = Depends(get_db), principal=De
 
 
 @router.post("/actions/{action_id}/approve", response_model=ActionOperationResponseModel)
-async def approve(action_id: str, req: ActionDecisionRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
+def approve(action_id: str, req: ActionDecisionRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
     ensure_settings_schema()
     ensure_action_tables(db)
     setting = db.query(Setting).filter(Setting.id == 1).one_or_none()
@@ -211,7 +211,7 @@ async def approve(action_id: str, req: ActionDecisionRequestModel, db: Session =
 
 
 @router.post("/actions/{action_id}/reject", response_model=ActionOperationResponseModel)
-async def reject(action_id: str, req: ActionDecisionRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
+def reject(action_id: str, req: ActionDecisionRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
     ensure_settings_schema()
     ensure_action_tables(db)
     setting = db.query(Setting).filter(Setting.id == 1).one_or_none()
@@ -230,7 +230,7 @@ async def reject(action_id: str, req: ActionDecisionRequestModel, db: Session = 
 
 
 @router.post("/actions/{action_id}/run", response_model=ActionOperationResponseModel)
-async def run(action_id: str, req: ActionRunRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
+def run(action_id: str, req: ActionRunRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
     ensure_action_tables(db)
     ensure_settings_schema()
     action = db.query(ActionRequest).filter(ActionRequest.action_id == action_id).one_or_none()
@@ -264,7 +264,7 @@ async def run(action_id: str, req: ActionRunRequestModel, db: Session = Depends(
 
 
 @router.post("/actions/{action_id}/rollback", response_model=ActionOperationResponseModel)
-async def rollback(action_id: str, req: ActionRollbackRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
+def rollback(action_id: str, req: ActionRollbackRequestModel, db: Session = Depends(get_db), principal=Depends(_principal)):
     ensure_settings_schema()
     ensure_action_tables(db)
     setting = db.query(Setting).filter(Setting.id == 1).one_or_none()

@@ -42,7 +42,7 @@ def _require_admin(token: Optional[str] = Cookie(default=None, alias="access_tok
 
 
 @router.get("/governance/tag-coverage")
-async def get_tag_coverage(
+def get_tag_coverage(
     start_date: str = Query(...),
     end_date: str = Query(...),
     db: Session = Depends(get_db),
@@ -151,7 +151,7 @@ async def get_tag_coverage(
 
 
 @router.get("/admin/allocation-rules")
-async def list_allocation_rules(db: Session = Depends(get_db), user=Depends(_require_admin)):
+def list_allocation_rules(db: Session = Depends(get_db), user=Depends(_require_admin)):
     ensure_allocation_rules_table(db)
     rows = db.query(AllocationRule).order_by(AllocationRule.priority.asc(), AllocationRule.id.asc()).all()
     return {
@@ -176,7 +176,7 @@ async def list_allocation_rules(db: Session = Depends(get_db), user=Depends(_req
 
 
 @router.post("/admin/allocation-rules")
-async def create_allocation_rule(req: AllocationRulePayload, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def create_allocation_rule(req: AllocationRulePayload, db: Session = Depends(get_db), user=Depends(_require_admin)):
     ensure_allocation_rules_table(db)
     row = AllocationRule(**req.model_dump())
     db.add(row)
@@ -187,7 +187,7 @@ async def create_allocation_rule(req: AllocationRulePayload, db: Session = Depen
 
 
 @router.put("/admin/allocation-rules/{rule_id}")
-async def update_allocation_rule(rule_id: int, req: AllocationRulePayload, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def update_allocation_rule(rule_id: int, req: AllocationRulePayload, db: Session = Depends(get_db), user=Depends(_require_admin)):
     ensure_allocation_rules_table(db)
     row = db.query(AllocationRule).filter(AllocationRule.id == rule_id).one_or_none()
     if not row:
@@ -200,7 +200,7 @@ async def update_allocation_rule(rule_id: int, req: AllocationRulePayload, db: S
 
 
 @router.delete("/admin/allocation-rules/{rule_id}")
-async def delete_allocation_rule(rule_id: int, db: Session = Depends(get_db), user=Depends(_require_admin)):
+def delete_allocation_rule(rule_id: int, db: Session = Depends(get_db), user=Depends(_require_admin)):
     ensure_allocation_rules_table(db)
     row = db.query(AllocationRule).filter(AllocationRule.id == rule_id).one_or_none()
     if not row:

@@ -31,6 +31,8 @@ from api.utils.dates import (
 
 router = APIRouter()
 
+_OCI_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="oci-read")
+
 # Cache TTLs
 COST_CACHE_TTL = 3600
 AGG_CACHE_TTL = 600
@@ -259,24 +261,24 @@ async def get_costs(
         
         # Run in thread pool with timeout
         loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor() as executor:
-            try:
-                timeout_sec = 120.0 if refresh else 10.0
-                costs = await asyncio.wait_for(
-                    loop.run_in_executor(executor, fetch_costs),
-                    timeout=timeout_sec
-                )
-            except asyncio.TimeoutError:
-                # Return cached data if available, even if expired
-                cached = get_cached(cache_key)
-                if cached:
-                    return {
-                        "success": True,
-                        "data": cached,
-                        "cached": True,
-                        "warning": "API timeout - showing cached data",
-                    }
-                costs = {}
+        executor = _OCI_EXECUTOR
+        try:
+            timeout_sec = 120.0 if refresh else 10.0
+            costs = await asyncio.wait_for(
+                loop.run_in_executor(executor, fetch_costs),
+                timeout=timeout_sec
+            )
+        except asyncio.TimeoutError:
+            # Return cached data if available, even if expired
+            cached = get_cached(cache_key)
+            if cached:
+                return {
+                    "success": True,
+                    "data": cached,
+                    "cached": True,
+                    "warning": "API timeout - showing cached data",
+                }
+            costs = {}
         
         result = {
             "period": period,
@@ -311,16 +313,31 @@ async def get_costs(
 
 
 @router.get("/by-resource")
-async def get_costs_by_resource(
+def get_costs_by_resource(
     compartment_id: Optional[str] = Query(None, description="Filter by compartment"),
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     include_skus: bool = Query(True, description="Include SKU line items per resource"),
     region: Optional[str] = Query(None, description="Filter to a specific OCI region"),
+    refresh: bool = Query(False),
+    view: Literal["full", "summary"] = Query("full"),
     db: Session = Depends(get_db),
 ):
     """Get costs grouped by resource."""
     cache_key = f"costs_by_resource_{compartment_id or 'all'}_{start_date or 'auto'}_{end_date or 'auto'}_{'skus' if include_skus else 'noskus'}_{region or 'all'}"
+    def present(result, cached=False):
+        if view == "summary":
+            result = {**result, "data": [{
+                "resource_id": row.get("resource_id"), "compartment_id": row.get("compartment_id"),
+                "total_cost": row.get("total_cost"), "resource_type": row.get("resource_type"),
+                "normalized_workload_category": row.get("normalized_workload_category"),
+                "sku_text": " ".join(sorted({s.get("sku_name") or "" for s in row.get("skus", [])})),
+            } for row in result["data"]]}
+        return {**result, "cached": cached}
+
+    cached = None if refresh else get_cached(cache_key)
+    if cached is not None:
+        return present(cached, True)
     try:
         calculator = get_cost_calculator()
         region_filter = region if (region and region != "all") else None
@@ -369,7 +386,7 @@ async def get_costs_by_resource(
             },
         }
         set_cached(cache_key, result, COST_CACHE_TTL)
-        return result
+        return present(result)
     except HTTPException:
         raise
     except Exception as e:
@@ -377,14 +394,14 @@ async def get_costs_by_resource(
         if cached is not None:
             cached["cached"] = True
             cached["warning"] = f"Live OCI usage unavailable, showing cached data: {str(e)}"
-            return cached
+            return present(cached, True)
         if _is_usage_rate_limit_error(e):
             raise HTTPException(status_code=503, detail="OCI Usage API is rate-limited (429). Retry shortly.")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/databases")
-async def get_database_costs(
+def get_database_costs(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
 ):
@@ -1049,7 +1066,7 @@ async def get_costs_by_region(
 
 
 @router.get("/trends")
-async def get_cost_trends(
+def get_cost_trends(
     months: int = Query(6, description="Number of months to include"),
 ):
     """Get monthly cost trends."""
@@ -1067,7 +1084,7 @@ async def get_cost_trends(
 
 
 @router.get("/top-resources")
-async def get_top_resources(
+def get_top_resources(
     limit: int = Query(10, description="Number of top resources to return"),
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),

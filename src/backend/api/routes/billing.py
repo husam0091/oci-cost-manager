@@ -1,10 +1,9 @@
 """Authenticated, auditable drill-down of actual OCI Usage API charges."""
 
-import asyncio
 import hashlib
 import json
 from datetime import UTC, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -22,7 +21,7 @@ router = APIRouter()
 
 
 @router.get("/spend")
-async def spend(
+def spend(
     start_date: str = Query(...),
     end_date: str = Query(...),
     region: Optional[str] = Query(None),
@@ -31,6 +30,7 @@ async def spend(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     refresh: bool = Query(False),
+    view: Literal["detail", "overview", "items"] = Query("detail"),
     token: Optional[str] = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
 ):
@@ -52,7 +52,7 @@ async def spend(
         sorted(principal.allowed_compartment_ids),
     ]
     key = (
-        "billing_spend_v2_"
+        "billing_spend_v3_"
         + hashlib.sha256(
             json.dumps(
                 [
@@ -78,8 +78,7 @@ async def spend(
         )
         try:
             calculator = get_cost_calculator()
-            items = await asyncio.to_thread(
-                calculator.get_usage_summary,
+            items = calculator.get_usage_summary(
                 start_date=start,
                 end_date=end,
                 granularity="MONTHLY",
@@ -128,10 +127,28 @@ async def spend(
         result["generated_at"] = datetime.now(UTC).isoformat()
         result["scope_limited"] = restricted
         set_cached(key, result, 600)
+    resource_counts = {}
+    for row in result["resources"]:
+        if row["resource_id"]:
+            resource_counts[row["currency"]] = resource_counts.get(row["currency"], 0) + 1
+    if view == "overview":
+        selected = []
+        per_currency = {}
+        for row in result["resources"]:
+            c = row["currency"]
+            per_currency[c] = per_currency.get(c, 0) + 1
+            if per_currency[c] <= 8:
+                selected.append(row)
+        data = {k: v for k, v in result.items() if k not in {"resources", "items"}}
+        data.update(resources=selected, resource_counts=resource_counts, items=[])
+    elif view == "items":
+        data = {k: v for k, v in result.items() if k not in {"resources", "by_service", "items"}}
+    else:
+        data = {k: v for k, v in result.items() if k != "items"}
     count = len(result["items"])
     return {
         "success": True,
-        "data": {**result, "items": result["items"][offset : offset + limit]},
+        "data": {**data, "items": [] if view == "overview" else result["items"][offset : offset + limit]},
         "meta": {
             "source": "OCI Usage API",
             "basis": "OCI-reported computedAmount; not a list-price estimate",
@@ -140,10 +157,11 @@ async def spend(
             "start_date": start.isoformat(),
             "end_date_exclusive": end.isoformat(),
             "total": count,
-            "returned": len(result["items"][offset : offset + limit]),
+            "returned": 0 if view == "overview" else len(result["items"][offset : offset + limit]),
             "offset": offset,
             "limit": limit,
-            "has_more": offset + limit < count,
+            "has_more": False if view == "overview" else offset + limit < count,
+            "view": view,
             "notes": [
                 "Recent usage may be delayed. This is not a final invoice; taxes, fees and invoice adjustments may differ.",
                 "Currencies are kept separate. Negative amounts remain credits/adjustments.",

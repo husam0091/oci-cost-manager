@@ -39,7 +39,7 @@ def _list_cache_key(start_date: str, end_date: str) -> str:
 
 
 @router.get("/recommendations/summary", response_model=RecommendationSummaryResponseModel)
-async def recommendations_summary(
+def recommendations_summary(
     start_date: str = Query(...),
     end_date: str = Query(...),
     token: Optional[str] = Cookie(default=None, alias="access_token"),
@@ -99,7 +99,7 @@ async def recommendations_summary(
 
 
 @router.get("/recommendations/list", response_model=RecommendationListResponseModel)
-async def recommendations_list(
+def recommendations_list(
     start_date: str = Query(...),
     end_date: str = Query(...),
     category: Optional[str] = Query(None),
@@ -192,7 +192,7 @@ async def recommendations_list(
 
 
 @router.get("/recommendations/resource/{recommendation_id}", response_model=RecommendationResourceResponseModel)
-async def recommendation_by_id(
+def recommendation_by_id(
     recommendation_id: str,
     start_date: str = Query(...),
     end_date: str = Query(...),

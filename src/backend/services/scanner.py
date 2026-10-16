@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Dict, Any
 import re
+import logging
+from contextvars import ContextVar
 
 from sqlalchemy.orm import Session
 
@@ -13,6 +15,16 @@ from services.cost_calculator import get_cost_calculator
 from services.allocation import evaluate_allocation, load_enabled_rules
 from services.budget_engine import evaluate_budget_statuses
 from core.cache import clear_cache
+from services.scan_lifecycle import acquire_scan_lock
+
+
+logger = logging.getLogger(__name__)
+_scan_warning_count = ContextVar("scan_warning_count", default=0)
+
+
+def _scan_warning(compartment_id, region):
+    _scan_warning_count.set(_scan_warning_count.get() + 1)
+    logger.warning("Inventory operation failed: compartment=%s region=%s; continuing with partial inventory", compartment_id, region, exc_info=True)
 
 
 def upsert_compartments(db: Session):
@@ -111,22 +123,23 @@ def _get_enabled_regions(db: Session) -> list[str]:
     return result
 
 
-def upsert_resources(db: Session) -> int:
+def upsert_resources(db: Session, progress=None) -> int:
     regions = _get_enabled_regions(db)
     comps = db.query(Compartment).all()
     count = 0
 
     for region in regions:
         oci_client = get_oci_client_for_region(region)
-        _scan_region(db, oci_client, comps, region)
+        count += _scan_region(db, oci_client, comps, region, progress=progress)
         db.flush()
 
     db.commit()
     return count
 
 
-def _scan_region(db: Session, oci_client, comps, region: str) -> int:
+def _scan_region(db: Session, oci_client, comps, region: str, progress=None) -> int:
     count = 0
+    image_cache = {}
 
     # Cache availability domains (needed for file storage)
     tenancy_id = oci_client.tenancy_id
@@ -137,6 +150,8 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
     # Boot volume attachments require availability_domain in some OCI regions, so we iterate all ADs.
     attached_vol_ids_global: set[str] = set()
     attached_boot_ids_global: set[str] = set()
+    volume_attachments_complete = True
+    boot_attachments_complete = True
     attached_states = {"ATTACHED", "ATTACHING", "DETACHING"}
     for comp in comps:
         comp_id = comp.id
@@ -147,7 +162,8 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                 if vol_id and state in attached_states:
                     attached_vol_ids_global.add(vol_id)
         except Exception:
-            pass
+            volume_attachments_complete = False
+            _scan_warning(comp_id, region)
         try:
             for att in oci_client.list_boot_volume_attachments(comp_id):
                 state = str(getattr(att, "lifecycle_state", "") or "").upper()
@@ -164,11 +180,17 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                         if bvol_id and state in attached_states:
                             attached_boot_ids_global.add(bvol_id)
                 except Exception:
-                    pass
+                    boot_attachments_complete = False
+                    _scan_warning(comp_id, region)
+        if progress:
+            progress(region, 0, len(comps), 0, f"checking attachments: {comp_id}")
 
-    for comp in comps:
+    if progress:
+        progress(region, 0, len(comps), count, "attachment checks completed")
+
+    for completed, comp in enumerate(comps, 1):
         comp_id = comp.id
-        
+
         # === Oracle DB Systems ===
         try:
             for dbs in oci_client.list_db_systems(comp_id):
@@ -185,7 +207,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                                      region=region)
                 count += 1
         except Exception:
-            pass
+            _scan_warning(comp_id, region)
         
         # === MySQL DB Systems ===
         try:
@@ -200,7 +222,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                                      region=region)
                 count += 1
         except Exception:
-            pass
+            _scan_warning(comp_id, region)
         
         # === Autonomous Databases ===
         try:
@@ -220,7 +242,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                                      region=region)
                 count += 1
         except Exception:
-            pass
+            _scan_warning(comp_id, region)
         
         # === Compute Instances (VMs) - includes SQL/Windows/security image detection ===
         try:
@@ -235,12 +257,21 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                 if not image_id and getattr(inst, "source_details", None):
                     image_id = getattr(inst.source_details, "image_id", None)
                 if image_id:
-                    image = oci_client.get_instance_image(image_id)
-                    if image:
-                        image_name = image.display_name
+                    try:
+                        if image_id not in image_cache:
+                            image_cache[image_id] = oci_client.get_instance_image(image_id)
+                        image = image_cache[image_id]
+                        if image:
+                            image_name = image.display_name
+                    except Exception:
+                        _scan_warning(comp_id, region)
                 
                 # Get private IP
-                private_ip = oci_client.get_instance_private_ip(inst.id, comp_id)
+                private_ip = None
+                try:
+                    private_ip = oci_client.get_instance_private_ip(inst.id, comp_id)
+                except Exception:
+                    _scan_warning(comp_id, region)
                 
                 profile = _detect_image_profile(image_name)
                 resource_type = profile["resource_type"]
@@ -270,7 +301,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                                      region=region)
                 count += 1
         except Exception:
-            pass
+            _scan_warning(comp_id, region)
         
         # === File Storage (NFS File Systems) ===
         for ad_name in ad_names:
@@ -310,7 +341,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                                      region=region)
                     count += 1
             except Exception:
-                pass
+                _scan_warning(comp_id, region)
 
         # === Block and Boot Volumes (including unattached) ===
         try:
@@ -320,7 +351,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
             for ad_name in ad_names:
                 for vol in oci_client.list_volumes(comp_id, ad_name):
                     vol_id = getattr(vol, "id", None)
-                    attached = vol_id in attached_vol_ids
+                    attached = True if vol_id in attached_vol_ids else False if volume_attachments_complete else None
                     _upsert_resource_row(
                         db,
                         ocid=vol_id,
@@ -334,7 +365,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                             "size_in_gbs": getattr(vol, "size_in_gbs", None),
                             "vpus_per_gb": getattr(vol, "vpus_per_gb", None),
                             "is_attached": attached,
-                            "attachment_state": "ATTACHED" if attached else "UNATTACHED",
+                            "attachment_state": "UNKNOWN" if attached is None else "ATTACHED" if attached else "UNATTACHED",
                             "time_created": str(getattr(vol, "time_created", None)),
                         },
                         region=region,
@@ -343,7 +374,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
 
                 for bvol in oci_client.list_boot_volumes(comp_id, ad_name):
                     bvol_id = getattr(bvol, "id", None)
-                    attached = bvol_id in attached_boot_ids
+                    attached = True if bvol_id in attached_boot_ids else False if boot_attachments_complete else None
                     _upsert_resource_row(
                         db,
                         ocid=bvol_id,
@@ -357,14 +388,14 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                             "size_in_gbs": getattr(bvol, "size_in_gbs", None),
                             "vpus_per_gb": getattr(bvol, "vpus_per_gb", None),
                             "is_attached": attached,
-                            "attachment_state": "ATTACHED" if attached else "UNATTACHED",
+                            "attachment_state": "UNKNOWN" if attached is None else "ATTACHED" if attached else "UNATTACHED",
                             "time_created": str(getattr(bvol, "time_created", None)),
                         },
                         region=region,
                     )
                     count += 1
         except Exception:
-            pass
+            _scan_warning(comp_id, region)
 
         # === Block Volume Backups ===
         try:
@@ -389,7 +420,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                 )
                 count += 1
         except Exception:
-            pass
+            _scan_warning(comp_id, region)
 
         # === Boot Volume Backups ===
         try:
@@ -414,7 +445,7 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                 )
                 count += 1
         except Exception:
-            pass
+            _scan_warning(comp_id, region)
         
         # === Object Storage (Buckets) ===
         try:
@@ -439,7 +470,12 @@ def _scan_region(db: Session, oci_client, comps, region: str) -> int:
                                      region=region)
                 count += 1
         except Exception:
-            pass
+            _scan_warning(comp_id, region)
+
+        db.commit()
+        if progress:
+            progress(region, completed, len(comps), count, "inventory")
+        logger.info("Inventory checkpoint: region=%s compartment=%s completed=%s/%s resources=%s warnings=%s", region, comp_id, completed, len(comps), count, _scan_warning_count.get())
 
     return count
 
@@ -540,28 +576,54 @@ def backfill_resource_allocation(db: Session):
     db.commit()
 
 
-def run_full_scan(db: Session) -> dict:
-    run = ScanRun()
-    db.add(run); db.commit(); db.refresh(run)
+def run_full_scan(db: Session, run_id=None, lease=None) -> dict:
+    own_lease = lease is None
+    lease = lease or acquire_scan_lock()
+    if lease is None:
+        return {"status": "already_running"}
+    warning_token = _scan_warning_count.set(0)
+    run = None
     try:
+        if run_id is not None:
+            run = db.get(ScanRun, run_id)
+            if run is None:
+                raise ValueError("Reserved scan run not found")
+        else:
+            run = ScanRun(status="running")
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+
+        def progress(region, completed, total, count, phase):
+            run.error_message = f"Progress: {region}; {phase}; compartments {completed}/{total}; resources {count}; warnings {_scan_warning_count.get()}"
+            db.commit()
+
         upsert_compartments(db)
-        upsert_resources(db)
+        count = upsert_resources(db, progress=progress)
         backfill_resource_allocation(db)
         evaluate_budget_statuses(db, persist_alerts=True)
         _queue_post_scan_refresh_jobs(db, run.id)
-        run.status = "success"
+        warnings = _scan_warning_count.get()
+        run.status = "partial" if warnings else "success"
+        run.error_message = f"Inventory saved: {count} resources; {warnings} operation warnings. See backend logs for failed operations." if warnings else None
         run.finished_at = datetime.now(UTC)
         db.commit()
-        # Invalidate short-lived API caches after a successful scan refresh.
         clear_cache()
-        return {"run_id": run.id, "status": run.status}
-    except Exception as e:
-        run.status = "failed"
-        run.error_message = str(e)
-        run.finished_at = datetime.now(UTC)
-        db.commit()
+        return {"run_id": run.id, "status": run.status, "resources": count, "warnings": warnings}
+    except Exception as exc:
+        db.rollback()
+        if run is not None:
+            run = db.get(ScanRun, run.id)
+            run.status = "failed"
+            run.error_message = f"{type(exc).__name__}: scan failed; completed compartment checkpoints retained. See backend logs."
+            run.finished_at = datetime.now(UTC)
+            db.commit()
         clear_cache()
         raise
+    finally:
+        _scan_warning_count.reset(warning_token)
+        if own_lease:
+            lease.close()
 
 
 def _queue_post_scan_refresh_jobs(db: Session, run_id: int) -> None:
