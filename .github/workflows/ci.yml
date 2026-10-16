@@ -2,9 +2,9 @@ name: ci
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "master"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "master"]
 
 jobs:
   frontend:
@@ -28,6 +28,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Calendar date regression tests
+        run: npm test
 
       - name: Build
         run: npm run build
@@ -61,13 +64,21 @@ jobs:
         run: python -m compileall -q .
 
       - name: Security response leak gates
+        shell: bash
         run: |
-          ! rg -n "\"(oci_key_content|oci_key_file|oci_pass_phrase|oci_config_file)\"\\s*:" src/backend/api/routes
-          ! rg -n "-----BEGIN|PRIVATE KEY" src/backend/api/routes src/frontend/src/services
+          set -euo pipefail
+          # Fail on matches AND search errors (rg exit 2), pass only for no match.
+          check_no_match() {
+            local result=0
+            rg -n -- "$1" "${@:2}" || result=$?
+            [ "$result" -eq 1 ]
+          }
+          check_no_match '"(oci_key_content|oci_key_file|oci_pass_phrase|oci_config_file)"\s*:' api/routes
+          check_no_match '-----BEGIN|PRIVATE KEY' api/routes ../frontend/src/services
 
       - name: Run tests with coverage
         env:
-          PYTHONPATH: src/backend
+          PYTHONPATH: .
           DATABASE_URL: sqlite:///./test.db
           REDIS_URL: redis://localhost:6379/0
         run: |

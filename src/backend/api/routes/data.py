@@ -1,10 +1,10 @@
 """Data routes that serve from the database only."""
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Literal, Optional
 
 from core.database import get_db
-from core.models import AllocationRule, Resource, Compartment, CostSnapshot, TrendPoint
+from core.models import Resource, Compartment, CostSnapshot, TrendPoint
 from services.allocation import evaluate_allocation, load_enabled_rules
 
 router = APIRouter()
@@ -20,6 +20,9 @@ async def data_resources(
     unowned_only: bool = Query(False),
     search: Optional[str] = Query(None, description="search by name or IP (case-insensitive, partial match)"),
     region: Optional[str] = Query(None, description="filter by OCI region"),
+    status: Optional[str] = Query(None, description="Lifecycle state filter"),
+    sort_by: Literal["name", "type", "region", "status", "updated_at"] = Query("name"),
+    sort_order: Literal["asc", "desc"] = Query("asc"),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -31,41 +34,60 @@ async def data_resources(
         q = q.filter(Resource.region == region)
     if type:
         q = q.filter(Resource.type == type)
-    if search:
-        from sqlalchemy import func, cast
+    if status:
+        q = q.filter(Resource.status == status)
+    if search and search.strip():
+        from sqlalchemy import cast
         from sqlalchemy import String
-        term = f"%{search.strip()}%"
+        # Treat wildcard characters as literal search input.
+        term = "%" + search.strip().replace("/", "//").replace("%", "/%").replace("_", "/_") + "%"
         q = q.filter(
-            Resource.name.ilike(term) |
-            cast(Resource.details["private_ip"], String).ilike(term)
+            Resource.name.ilike(term, escape="/") |
+            cast(Resource.details["private_ip"], String).ilike(term, escape="/")
         )
-    total = q.count()
-    rows = q.order_by(Resource.name.asc()).offset(offset).limit(limit).all()
+    # A unique tie-breaker keeps pages deterministic when names are duplicated.
+    column = getattr(Resource, sort_by)
+    q = q.order_by(column.desc() if sort_order == "desc" else column.asc(), Resource.ocid.asc())
     rules = load_enabled_rules(db)
-    data = [{
-        "id": r.ocid, "name": r.name, "type": r.type, "compartment_id": r.compartment_id,
-        "region": r.region, "status": r.status, "shape": r.shape, "details": r.details
-    } for r in rows]
-    enriched = []
-    for item, model in zip(data, rows):
+    allocation_filters = bool(env or team or app or unowned_only)
+
+    def enrich(model):
         alloc = evaluate_allocation(model, rules, compartment_name=None, sku_text="")
         details = model.details or {}
-        item["env"] = details.get("env") or alloc.env
-        item["team"] = details.get("team") or alloc.team
-        item["app"] = details.get("app") or alloc.app
-        item["allocation_confidence"] = details.get("allocation_confidence") or alloc.allocation_confidence
-        item["allocation_reason"] = details.get("allocation_reason") or alloc.allocation_reason
-        if env and item["env"] != env:
-            continue
-        if team and item["team"] != team:
-            continue
-        if app and item["app"] != app:
-            continue
-        if unowned_only and not (item["env"] == "Unallocated" or item["team"] == "Unallocated" or item["app"] == "Unallocated"):
-            continue
-        enriched.append(item)
-    data = enriched
-    return {"success": True, "data": data, "meta": {"total": total, "returned": len(data), "offset": offset}}
+        return {
+            "id": model.ocid, "name": model.name, "type": model.type,
+            "compartment_id": model.compartment_id, "region": model.region,
+            "status": model.status, "shape": model.shape, "details": model.details,
+            "env": details.get("env") or alloc.env,
+            "team": details.get("team") or alloc.team,
+            "app": details.get("app") or alloc.app,
+            "allocation_confidence": details.get("allocation_confidence") or alloc.allocation_confidence,
+            "allocation_reason": details.get("allocation_reason") or alloc.allocation_reason,
+        }
+
+    if not allocation_filters:
+        total = q.count()
+        data = [enrich(row) for row in q.offset(offset).limit(limit).all()]
+    else:
+        # Rule-derived ownership cannot be filtered in SQL. Stream the candidates,
+        # count all matches, and keep only this page in memory. Filtering must
+        # precede slicing or matches beyond the first SQL page are lost.
+        data = []
+        total = 0
+        for row in q.yield_per(500):
+            item = enrich(row)
+            if any(value and item[key] != value for key, value in (("env", env), ("team", team), ("app", app))):
+                continue
+            if unowned_only and not any(item[key] == "Unallocated" for key in ("env", "team", "app")):
+                continue
+            if offset <= total < offset + limit:
+                data.append(item)
+            total += 1
+    return {"success": True, "data": data, "meta": {
+        "total": total, "returned": len(data), "offset": offset,
+        "limit": limit, "has_more": offset + len(data) < total,
+        "sort_by": sort_by, "sort_order": sort_order,
+    }}
 
 
 @router.get("/compartments/tree")

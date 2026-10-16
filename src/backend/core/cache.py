@@ -1,6 +1,9 @@
 """Cache service for storing API responses."""
 
 import json
+import logging
+import os
+import tempfile
 import time
 from typing import Optional, Any
 from pathlib import Path
@@ -59,17 +62,22 @@ def set_cached(key: str, value: Any, ttl: int = DEFAULT_TTL):
         ttl: Time to live in seconds.
     """
     cache_file = _get_cache_file(key)
-    
+    temporary_path = None
     try:
-        with open(cache_file, "w") as f:
-            json.dump({
-                "value": value,
-                "timestamp": time.time(),
-                "ttl": ttl,
-            }, f)
+        # Serialize first: a bad value must not destroy the previous good entry.
+        payload = json.dumps({"value": value, "timestamp": time.time(), "ttl": ttl}, allow_nan=False)
+        # Readers see either the old or the new complete JSON document, including
+        # when multiple API/worker processes update the same key concurrently.
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=CACHE_DIR, suffix=".tmp", delete=False) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(payload)
+        os.replace(temporary_path, cache_file)
         CACHE_STATS["sets"] += 1
-    except Exception as e:
-        print(f"Cache write error: {e}")
+    except (OSError, TypeError, ValueError):
+        logging.getLogger(__name__).warning("Cache write failed", exc_info=True)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def clear_cache(key: Optional[str] = None):
@@ -80,11 +88,10 @@ def clear_cache(key: Optional[str] = None):
     """
     if key:
         cache_file = _get_cache_file(key)
-        if cache_file.exists():
-            cache_file.unlink()
+        cache_file.unlink(missing_ok=True)
     else:
         for cache_file in CACHE_DIR.glob("*.json"):
-            cache_file.unlink()
+            cache_file.unlink(missing_ok=True)
 
 
 def get_cache_info() -> dict:

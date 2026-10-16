@@ -32,7 +32,7 @@ from api.routes import (
     health,
     jobs,
 )
-from api.routes import data, admin
+from api.routes import data, admin, billing
 from api.routes import cache
 from api.routes import subscriptions
 from core.scheduler import start_scheduler
@@ -72,6 +72,7 @@ app.add_middleware(
 )
 
 # Include API routes
+app.include_router(billing.router, prefix=f"{settings.api_prefix}/billing", tags=["Billed Spend"])
 app.include_router(
     actions.router,
     prefix=settings.api_prefix,

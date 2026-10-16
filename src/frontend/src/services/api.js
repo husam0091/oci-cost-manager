@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { toIsoDate } from '../utils/dateRanges';
 
 const API_BASE = '/api/v1';
 
@@ -210,7 +211,6 @@ const mapRangeFromParams = (params = {}) => {
   if (params.range) return params.range;
   return 'prev_month';
 };
-const toIsoDate = (value) => (typeof value === 'string' ? value : new Date(value).toISOString().slice(0, 10));
 const resolveDateRange = (params = {}) => {
   if (params.start_date && params.end_date) {
     return {
@@ -307,7 +307,7 @@ export const adminGetAllocationRules = () => api.get('/admin/allocation-rules');
 export const adminCreateAllocationRule = (data) => api.post('/admin/allocation-rules', data);
 export const adminUpdateAllocationRule = (id, data) => api.put(`/admin/allocation-rules/${id}`, data);
 export const adminDeleteAllocationRule = (id) => api.delete(`/admin/allocation-rules/${id}`);
-const _toIsoDate = (value) => (typeof value === 'string' ? value : new Date(value).toISOString().slice(0, 10));
+const _toIsoDate = toIsoDate;
 
 export const dashboardSummary = ({ start_date, end_date }) =>
   api.get('/dashboard/summary', {
@@ -408,8 +408,8 @@ export const costsMoversV2 = ({
   });
 export const recommendationsSummary = ({ start_date, end_date }) => {
   const params = {
-    start_date: typeof start_date === 'string' ? start_date : new Date(start_date).toISOString().slice(0, 10),
-    end_date: typeof end_date === 'string' ? end_date : new Date(end_date).toISOString().slice(0, 10),
+    start_date: toIsoDate(start_date),
+    end_date: toIsoDate(end_date),
   };
   return api.get('/recommendations/summary', { params });
 };
@@ -424,8 +424,8 @@ export const recommendationsList = ({
   env,
 }) => {
   const params = {
-    start_date: typeof start_date === 'string' ? start_date : new Date(start_date).toISOString().slice(0, 10),
-    end_date: typeof end_date === 'string' ? end_date : new Date(end_date).toISOString().slice(0, 10),
+    start_date: toIsoDate(start_date),
+    end_date: toIsoDate(end_date),
     category,
     confidence,
     compartment_id,
@@ -437,8 +437,8 @@ export const recommendationsList = ({
 };
 export const recommendationById = ({ recommendation_id, start_date, end_date }) => {
   const params = {
-    start_date: typeof start_date === 'string' ? start_date : new Date(start_date).toISOString().slice(0, 10),
-    end_date: typeof end_date === 'string' ? end_date : new Date(end_date).toISOString().slice(0, 10),
+    start_date: toIsoDate(start_date),
+    end_date: toIsoDate(end_date),
   };
   return api.get(`/recommendations/resource/${encodeURIComponent(recommendation_id)}`, { params });
 };
@@ -506,3 +506,6 @@ export const adminUpdateUser = (userId, data) => api.put(`/admin/users/${encodeU
 export const adminDeleteUser = (userId) => api.delete(`/admin/users/${encodeURIComponent(userId)}`);
 export const adminGetRegions = () => api.get('/admin/regions');
 export const adminUpdateRegions = (data) => api.put('/admin/regions', data);
+
+// Actual OCI-reported charges, with explicit currency and licensing evidence.
+export const getBilledSpend = (params = {}) => api.get('/billing/spend', { params, timeout: 120000 });
