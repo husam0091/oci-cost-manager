@@ -13,8 +13,8 @@ function currency(value) {
 }
 
 function deltaChipClass(value) {
-  if (value > 0) return 'bg-emerald-50 text-emerald-700';
-  if (value < 0) return 'bg-rose-50 text-rose-700';
+  if (value > 0) return 'bg-rose-50 text-rose-700';
+  if (value < 0) return 'bg-emerald-50 text-emerald-700';
   return 'bg-slate-100 text-slate-700';
 }
 
@@ -467,7 +467,7 @@ function DataFreshnessPanel({ lastScan, ociStatus }) {
             </div>
             <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 space-y-1 dark:border-amber-800 dark:bg-amber-950">
               <p className="text-xs font-semibold text-amber-800 flex items-center gap-1 dark:text-amber-300"><AlertTriangle size={13} /> Billing Lag</p>
-              <p className="text-xs text-amber-700 dark:text-amber-400">OCI billing data has a <span className="font-medium">24–48 hour processing delay</span>. Costs shown reflect charges up to 1–2 days ago. Today's actual charges will appear in a future scan.</p>
+              <p className="text-xs text-amber-700 dark:text-amber-400">OCI billing data has a <span className="font-medium">24–48 hour processing delay</span>. Costs shown reflect charges up to 1–2 days ago. Today&apos;s actual charges will appear in a future scan.</p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1 dark:border-slate-600 dark:bg-slate-900">
               <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">Currency</p>

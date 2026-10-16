@@ -1,4 +1,10 @@
-export const toIsoDate = (date) => date.toISOString().slice(0, 10);
+// Billing ranges represent calendar dates in the user's timezone, not UTC instants.
+export const toIsoDate = (value) => {
+  if (typeof value === 'string') return value;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new RangeError('Invalid calendar date');
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
 
 export function getDateRangeForPreset(mode, now = new Date()) {
   const year = now.getFullYear();

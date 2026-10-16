@@ -352,10 +352,6 @@ function Resources({ activeRegion = 'all' }) {
   const [compartmentId, setCompartmentId] = useState('');
   const [counts, setCounts] = useState({ all: 0 });
   const [period, setPeriod] = useState('monthly');
-  const [envFilter, setEnvFilter] = useState('');
-  const [teamFilter, setTeamFilter] = useState('');
-  const [appFilter, setAppFilter] = useState('');
-  const [unownedOnly, setUnownedOnly] = useState(false);
   const [filterCost, setFilterCost] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0);
   const [searchInput, setSearchInput] = useState('');
@@ -624,7 +620,7 @@ function Resources({ activeRegion = 'all' }) {
         <>
           {searchQuery && (
             <p className="text-sm text-slate-500">
-              <span className="font-medium text-slate-700">{filteredResources.length}</span> results for <span className="font-medium text-slate-700">"{searchQuery}"</span>
+              <span className="font-medium text-slate-700">{filteredResources.length}</span> results for <span className="font-medium text-slate-700">&quot;{searchQuery}&quot;</span>
             </p>
           )}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -636,14 +632,14 @@ function Resources({ activeRegion = 'all' }) {
       ) : searchQuery ? (
         <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-12 text-center shadow-sm dark:border-slate-700 dark:bg-slate-800">
           <Search size={48} className="mx-auto mb-4 text-slate-300" />
-          <p className="text-slate-500">No resources match "<span className="font-medium">{searchQuery}</span>"</p>
+          <p className="text-slate-500">No resources match &quot;<span className="font-medium">{searchQuery}</span>&quot;</p>
           <button onClick={() => { setSearchInput(''); setSearchQuery(''); }} className="mt-3 text-sm text-sky-600 hover:underline">Clear search</button>
         </div>
       ) : activeRegion && activeRegion !== 'all' ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-12 text-center shadow-sm">
           <Server size={48} className="mx-auto mb-4 text-amber-300" />
           <p className="text-base font-semibold text-amber-800">No resources found in <span className="font-mono">{activeRegion}</span></p>
-          <p className="mt-2 text-sm text-amber-700">This region hasn't been scanned yet, or your tenancy has no resources there.</p>
+          <p className="mt-2 text-sm text-amber-700">This region hasn&apos;t been scanned yet, or your tenancy has no resources there.</p>
           <p className="mt-1 text-sm text-amber-700">Make sure your OCI tenancy is subscribed to this region, then run a scan.</p>
           <button
             onClick={handleRefresh}
