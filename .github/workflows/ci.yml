@@ -64,17 +64,7 @@ jobs:
         run: python -m compileall -q .
 
       - name: Security response leak gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Fail on matches AND search errors (rg exit 2), pass only for no match.
-          check_no_match() {
-            local result=0
-            rg -n -- "$1" "${@:2}" || result=$?
-            [ "$result" -eq 1 ]
-          }
-          check_no_match '"(oci_key_content|oci_key_file|oci_pass_phrase|oci_config_file)"\s*:' api/routes
-          check_no_match '-----BEGIN|PRIVATE KEY' api/routes ../frontend/src/services
+        run: python scripts/check_response_leaks.py
 
       - name: Run tests with coverage
         env:

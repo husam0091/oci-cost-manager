@@ -17,7 +17,7 @@ Removed duplicate summary/mover/database panels from Cost Analysis, four unused 
 - Budget-status caches now include identity, role, scope and UTC day to prevent cross-user response reuse.
 - Atomic file-cache replacement preserves previous valid entries if serialization fails and rejects non-finite JSON. Concurrent clears tolerate already-deleted files.
 - Calendar-date serialization no longer shifts Riyadh dates backward; shared API wrappers use the corrected helper.
-- CI covers main/master, runs calendar regressions and fixes backend working-directory/security-search checks. Search errors now fail the gate.
+- CI covers main/master, runs calendar regressions and fixes backend working-directory/security-search checks. The security gate uses Python standard library, requires its source directories, and fails without printing matched secrets.
 
 ## Billing interpretation
 
