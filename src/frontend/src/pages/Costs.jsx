@@ -1,353 +1,69 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Globe } from 'lucide-react';
-import { getCostSummary, getCostBreakdown, getCostMovers, getDatabaseCosts } from '../services/api';
-import { getDateRangeForPreset, toIsoDate } from '../utils/dateRanges';
-import { UI_COPY } from '../constants/copy';
-import { useStaleSnapshotQuery } from '../hooks/useStaleSnapshotQuery';
-
-function currency(value) {
-  return `$${Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function deltaClass(value) {
-  if (value > 0) return 'bg-emerald-50 text-emerald-700';
-  if (value < 0) return 'bg-rose-50 text-rose-700';
-  return 'bg-slate-100 text-slate-700';
-}
-
-function DeltaChip({ deltaAbs, deltaPct }) {
-  return (
-    <span className={`inline-flex rounded-full px-2 py-1 text-xs ${deltaClass(deltaAbs)}`}>
-      {deltaAbs > 0 ? '+' : ''}{currency(deltaAbs)} ({deltaPct > 0 ? '+' : ''}{Number(deltaPct || 0).toFixed(2)}%)
-    </span>
-  );
-}
-
-function WidgetSkeleton({ className = '' }) {
-  return <div className={`animate-pulse rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 ${className}`} />;
-}
-
-function Costs({ activeRegion }) {
-  const [period, setPeriod] = useState('prev_month');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
-  const [groupBy, setGroupBy] = useState('service');
-  const customRangeInvalid = period === 'custom' && customStartDate && customEndDate && customStartDate > customEndDate;
-  const customReady = period !== 'custom' || (customStartDate && customEndDate && !customRangeInvalid);
-
-  const range = useMemo(() => {
-    if (period === 'custom') {
-      if (!customStartDate || !customEndDate) return null;
-      return { start: customStartDate, end: customEndDate };
-    }
-    return getDateRangeForPreset(period);
-  }, [period, customStartDate, customEndDate]);
-
+import { useEffect, useState } from 'react';
+import { getBilledSpend } from '../services/api';
+import { getDateRangeForPreset } from '../utils/dateRanges';
+const card = 'rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800';
+const control = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-800';
+const money = (n, c) => { try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: c }).format(n); } catch { return `${Number(n).toFixed(2)} ${c}`; } };
+export default function Costs({ activeRegion = 'all' }) {
+  const [range, setRange] = useState(() => getDateRangeForPreset('prev_month'));
+  const [preset, setPreset] = useState('prev_month');
+  const [service, setService] = useState('');
+  const [resource, setResource] = useState(null);
+  const [offset, setOffset] = useState(0);
+  const [version, setVersion] = useState(0);
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const invalid = !range.start || !range.end || range.start > range.end;
+  useEffect(() => { setOffset(0); setResource(null); setService(''); }, [activeRegion]);
   useEffect(() => {
-    if (period !== 'custom') return;
-    if (customStartDate && customEndDate) return;
-    const now = new Date();
-    const end = toIsoDate(now);
-    const start = new Date(now);
-    start.setDate(start.getDate() - 90);
-    setCustomStartDate(toIsoDate(start));
-    setCustomEndDate(end);
-  }, [period, customStartDate, customEndDate]);
-
-  const loadCostsData = useCallback(async () => {
-    if (!range || !customReady) {
-      return null;
-    }
-    const params = { start_date: range.start, end_date: range.end, region: activeRegion };
-    const [summaryRes, breakdownRes, moversRes, resourceRes, dbRes] = await Promise.all([
-      getCostSummary(params),
-      getCostBreakdown({ ...params, group_by: groupBy, compare: 'previous', limit: 8, min_share_pct: 0.5 }),
-      getCostMovers({ ...params, group_by: 'service', compare: 'previous', direction: 'up', limit: 10 }),
-      getCostMovers({ ...params, group_by: 'resource', compare: 'previous', direction: 'both', limit: 10 }),
-      getDatabaseCosts(params),
-    ]);
-
-    const dbPayload = dbRes.data?.data || {};
-    const dbCosts = {
-      oracle_db: { total: Number(dbPayload.oracle_db?.total || 0) },
-      mysql: { total: Number(dbPayload.mysql?.total || 0) },
-      sql_server: { total: Number(dbPayload.sql_server?.total || 0) },
-    };
-    return {
-      summary: summaryRes.data?.data || null,
-      breakdown: breakdownRes.data?.data || null,
-      serviceMovers: moversRes.data?.data?.items || [],
-      resourceMovers: resourceRes.data?.data?.items || [],
-      dbCosts,
-    };
-  }, [customReady, groupBy, range, activeRegion]);
-
-  const {
-    data: costsData,
-    loading,
-    refreshing,
-    error,
-    isStale,
-    savedAt,
-    refresh,
-    hasData,
-  } = useStaleSnapshotQuery({
-    cacheKey: `costs:${range?.start || 'none'}:${range?.end || 'none'}:${groupBy}:${activeRegion || 'all'}`,
-    ttlMs: 60 * 60 * 1000,
-    queryFn: loadCostsData,
-    dependencies: [range?.start, range?.end, groupBy, customReady, activeRegion],
-    fallbackError: 'Failed to load cost analysis',
-  });
-
-  const summary = costsData?.summary || null;
-  const breakdown = costsData?.breakdown || null;
-  const serviceMovers = costsData?.serviceMovers || [];
-  const resourceMovers = costsData?.resourceMovers || [];
-  const dbCosts = costsData?.dbCosts || null;
-  const rows = breakdown?.items || [];
-  const empty = Number(summary?.total || 0) === 0;
-  const mappingHealth = breakdown?.mapping_health || null;
-
-  const regionLabel = activeRegion && activeRegion !== 'all' ? activeRegion : null;
-
-  return (
-    <div className="space-y-6 dark:text-slate-100">
-      <div className="flex flex-col items-start justify-between gap-3 md:flex-row md:items-center">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Cost Analysis</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Decision-first cost view with deltas and movers</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {regionLabel && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 dark:border-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-              <Globe size={12} />
-              {regionLabel}
-            </div>
-          )}
-          <select
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-          >
-            <option value="prev_month">Previous Full Month</option>
-            <option value="ytd">YTD</option>
-            <option value="prev_year">Previous Full Year</option>
-            <option value="custom">Custom Range</option>
-          </select>
-        </div>
-      </div>
-
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Prev Month = last full calendar month, YTD = Jan 1 to today.
-        {regionLabel ? ` All costs filtered to region: ${regionLabel}.` : ' Showing all regions.'}
-      </p>
-
-      {period === 'custom' && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <label className="text-sm text-slate-600 dark:text-slate-400">
-              Start Date
-              <input
-                type="date"
-                value={customStartDate}
-                max={toIsoDate(new Date())}
-                onChange={(e) => setCustomStartDate(e.target.value)}
-                className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
-              />
-            </label>
-            <label className="text-sm text-slate-600 dark:text-slate-400">
-              End Date
-              <input
-                type="date"
-                value={customEndDate}
-                max={toIsoDate(new Date())}
-                onChange={(e) => setCustomEndDate(e.target.value)}
-                className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
-              />
-            </label>
-          </div>
-          {!customReady && !customRangeInvalid && <p className="mt-3 text-sm text-amber-700 dark:text-amber-400">Set both start and end date to load costs.</p>}
-          {customRangeInvalid && <p className="mt-3 text-sm text-rose-700 dark:text-rose-400">End date must be on or after start date.</p>}
-        </div>
-      )}
-
-      {error ? (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
-          Data unavailable due to API error
-          <button
-            type="button"
-            onClick={() => refresh()}
-            className="ml-3 rounded-lg border border-amber-400 px-2 py-1 text-xs hover:bg-amber-100 dark:border-amber-600 dark:hover:bg-amber-900"
-          >
-            Retry
-          </button>
-        </div>
-      ) : null}
-
-      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-        <span>{savedAt ? `Snapshot: ${new Date(savedAt).toLocaleString()}` : 'No snapshot yet'}</span>
-        <span>{refreshing ? 'Refreshing' : isStale ? 'Stale snapshot' : 'Fresh snapshot'}</span>
-      </div>
-
-      {!hasData && loading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <WidgetSkeleton className="h-28" />
-          <WidgetSkeleton className="h-28" />
-          <WidgetSkeleton className="h-28" />
-          <WidgetSkeleton className="h-28" />
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Period Total</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{currency(summary?.total)}</p>
-              <div className="mt-2"><DeltaChip deltaAbs={summary?.delta_abs || 0} deltaPct={summary?.delta_pct || 0} /></div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Top Driver</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{summary?.top_driver?.entity || 'No data'}</p>
-              <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">Share {(summary?.top_driver?.share || 0).toFixed(2)}%</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Biggest Mover</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{summary?.biggest_mover?.entity || 'No data'}</p>
-              <div className="mt-2"><DeltaChip deltaAbs={summary?.biggest_mover?.delta_abs || 0} deltaPct={summary?.biggest_mover?.delta_pct || 0} /></div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-              <p className="text-sm font-medium text-slate-600 dark:text-slate-400">{UI_COPY.detection.unallocatedCost}</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-900 dark:text-slate-100">{summary?.unallocated?.count || 0}</p>
-              <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{(summary?.unallocated?.pct || 0).toFixed(2)}%</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-sm font-medium text-slate-600">Oracle DB</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-900">{currency(dbCosts?.oracle_db?.total)}</p>
-              <p className="mt-1 text-xs text-slate-400">Services matching ORACLE_DATABASE / DATABASE</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-sm font-medium text-slate-600">MySQL</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-900">{currency(dbCosts?.mysql?.total)}</p>
-              <p className="mt-1 text-xs text-slate-400">Services matching MYSQL</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-sm font-medium text-slate-600">SQL Server</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-900">{currency(dbCosts?.sql_server?.total)}</p>
-              <p className="mt-1 text-xs text-slate-400">SKUs containing 'sql server' or 'microsoft'</p>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-medium text-slate-600 dark:text-slate-400">Breakdown</h3>
-              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-600 dark:bg-slate-900">
-                {[
-                  ['service', 'Service'],
-                  ['compartment', 'Compartment'],
-                  ['region', 'Region'],
-                  ['top_resources', 'Top Resources'],
-                  ['sku', 'SKU'],
-                ].map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setGroupBy(value)}
-                    className={`rounded-md px-3 py-1 text-xs ${groupBy === value ? 'bg-slate-200 text-slate-900 dark:bg-slate-600 dark:text-slate-100' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700'}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {empty || rows.length === 0 ? (
-              <p className="text-sm text-slate-500">No data for selected range</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-400">
-                      <th className="py-2 text-left">Entity</th>
-                      <th className="py-2 text-right">Current</th>
-                      <th className="py-2 text-right">Previous</th>
-                      <th className="py-2 text-right">Delta</th>
-                      <th className="py-2 text-right">Delta %</th>
-                      <th className="py-2 text-right">Share</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row) => (
-                      <tr key={row.name} className="border-b border-slate-100 dark:border-slate-700">
-                        <td className="py-2 text-slate-800 dark:text-slate-200">
-                          {row.name}
-                          {row.name === 'Unallocated' ? (
-                            <span className="ml-2 rounded-full bg-rose-50 px-2 py-1 text-[10px] font-medium text-rose-700 dark:bg-rose-900 dark:text-rose-300">
-                              {UI_COPY.detection.lowConfidence}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td className="py-2 text-right text-slate-900 dark:text-slate-100">{currency(row.current)}</td>
-                        <td className="py-2 text-right text-slate-700 dark:text-slate-400">{currency(row.previous)}</td>
-                        <td className="py-2 text-right"><DeltaChip deltaAbs={row.delta_abs} deltaPct={row.delta_pct} /></td>
-                        <td className="py-2 text-right text-slate-700 dark:text-slate-400">{Number(row.delta_pct || 0).toFixed(2)}%</td>
-                        <td className="py-2 text-right text-slate-700 dark:text-slate-400">{Number(row.share_pct || 0).toFixed(2)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-              <h3 className="mb-3 text-sm font-medium text-slate-600 dark:text-slate-400">Top Movers (Services)</h3>
-              {serviceMovers.length === 0 ? (
-                <p className="text-sm text-slate-500">No data for selected range</p>
-              ) : (
-                <div className="space-y-2">
-                  {serviceMovers.map((row) => (
-                    <div key={row.name} className="rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium text-slate-800 dark:text-slate-200">{row.name}</span>
-                        <span className="text-slate-900 dark:text-slate-100">{currency(row.current)}</span>
-                      </div>
-                      <div className="mt-1 flex items-center justify-between">
-                        <span className="text-xs text-slate-500">prev {currency(row.previous)}</span>
-                        <DeltaChip deltaAbs={row.delta_abs} deltaPct={row.delta_pct} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-              <h3 className="mb-3 text-sm font-medium text-slate-600 dark:text-slate-400">Top Resources (by delta)</h3>
-              {resourceMovers.length === 0 ? (
-                <p className="text-sm text-slate-500">No data for selected range</p>
-              ) : (
-                <div className="space-y-2">
-                  {resourceMovers.map((row, idx) => (
-                    <div key={`${row.name}-${idx}`} className="rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate font-medium text-slate-800 dark:text-slate-200">{row.name}</span>
-                        <span className="whitespace-nowrap text-slate-900 dark:text-slate-100">{currency(row.current)}</span>
-                      </div>
-                      <div className="mt-1 flex items-center justify-between">
-                        <span className="text-xs text-slate-500">{row.type || 'resource'}{row.compartment_name ? ` · ${row.compartment_name}` : ''}</span>
-                        <DeltaChip deltaAbs={row.delta_abs} deltaPct={row.delta_pct} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+    let cancelled = false; setReport(null); setError('');
+    if (invalid) { setLoading(false); return undefined; }
+    setLoading(true);
+    getBilledSpend({ start_date: range.start, end_date: range.end, region: activeRegion, service: service || undefined,
+      resource_id: resource?.id, offset, limit: 100, refresh: version > 0 && offset === 0,
+    }).then(r => { if (!cancelled) setReport(r.data); }).catch(e => { if (!cancelled) setError(e.response?.data?.error?.reason || 'Could not read OCI charges. Check sign-in and Diagnostics.'); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [range.start, range.end, service, resource?.id, activeRegion, offset, version, invalid]);
+  const data = report?.data, meta = report?.meta, rows = data?.items || [];
+  function exportPage() {
+    const csv = [['OCI-reported charges; CURRENT PAGE ONLY; not a final invoice'], ['Start UTC', range.start, 'End inclusive UTC', range.end],
+      ['Service', 'Resource', 'OCID', 'SKU', 'Part number', 'Currency', 'Cost', 'Quantity', 'Unit', 'Effective rate', 'License evidence'],
+      ...rows.map(r => [r.service, r.resource_name, r.resource_id, r.sku_name, r.sku_part_number, r.currency, r.cost, r.quantity, r.unit, r.effective_unit_cost, r.licensing.model])]
+      .map(row => row.map(v => { let t = String(v ?? ''); if (/^[=+@\t\r]/.test(t) || (/^-/.test(t) && !/^-\d+(\.\d+)?$/.test(t))) t = `'${t}`; return `"${t.replaceAll('"', '""')}"`; }).join(',')).join('\r\n');
+    const u = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })); const a = document.createElement('a'); a.href = u; a.download = `oci-spend-${range.start}-page-${offset / 100 + 1}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(u), 1000);
+  }
+  return <div className="space-y-5">
+    <div className="flex flex-wrap justify-between gap-4"><div><h1 className="text-2xl font-bold">Understand your cloud bill</h1><p className="mt-1 text-sm text-slate-500">Actual OCI-reported charges. Open a resource to inspect each billed SKU.</p></div><button className={control} disabled={loading || invalid} onClick={() => { setOffset(0); setVersion(v => v + 1); }}>Refresh from OCI</button></div>
+    <div className={`${card} flex flex-wrap items-end gap-4`}>
+      <label className="text-sm">Period<select aria-label="Period" className={`${control} mt-1 block`} value={preset} onChange={e => { setPreset(e.target.value); setOffset(0); setResource(null); if (e.target.value !== 'custom') setRange(getDateRangeForPreset(e.target.value)); }}><option value="prev_month">Previous full month</option><option value="ytd">Year to date</option><option value="prev_year">Previous full year</option><option value="custom">Custom dates</option></select></label>
+      {['start', 'end'].map(k => <label className="text-sm" key={k}>{k === 'start' ? 'Start (UTC)' : 'End, inclusive (UTC)'}<input aria-label={`${k} date`} className={`${control} mt-1 block`} type="date" value={range[k]} onChange={e => { setPreset('custom'); setRange({ ...range, [k]: e.target.value }); setOffset(0); }} /></label>)}
+      <label className="text-sm">Service<select aria-label="Service" className={`${control} mt-1 block`} value={service} onChange={e => { setService(e.target.value); setResource(null); setOffset(0); }}><option value="">All services</option>{[...new Set([service, ...(data?.services || [])].filter(Boolean))].map(s => <option key={s}>{s}</option>)}</select></label><span className="pb-2 text-xs text-slate-500">Region: {activeRegion === 'all' ? 'All regions' : activeRegion}</span>
     </div>
-  );
+    {invalid && <p role="alert" className="text-rose-700">Choose valid dates with the end on or after the start.</p>}
+    {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-800">{error} <button className="underline" onClick={() => setVersion(v => v + 1)}>Retry</button></div>}
+    {loading && <div role="status" className={card}>Reading OCI billing… No estimated bill is substituted.</div>}
+    {report && <>
+      <div className="grid gap-4 md:grid-cols-3">{data.totals.map(t => <section className={card} key={t.currency}><p className="text-xs uppercase text-slate-500">Net reported spend · {t.currency}</p><p className="my-3 text-3xl font-semibold">{money(t.net, t.currency)}</p><p className="text-xs text-slate-500">Charges {money(t.charges, t.currency)} · Credits {money(t.credits, t.currency)}</p></section>)}</div>
+      <div className="flex flex-wrap justify-between gap-2 text-xs text-slate-500"><span>{meta.cached ? 'Cached OCI response' : 'Fetched from OCI'} · {new Date(data.generated_at).toLocaleString()} · 10-minute cache</span><span>{data.scope_limited ? 'Assigned scope only; unattributed resources excluded' : 'Includes unattributed charges'}</span></div>
+      {resource && <div className="flex flex-wrap gap-4 rounded-xl bg-cyan-50 p-4 text-sm text-cyan-900"><button className="underline" onClick={() => { setResource(null); setOffset(0); }}>← All resources</button><strong>{resource.name}</strong></div>}
+      <section className={card}><div className="mb-4 flex flex-wrap justify-between gap-3"><div><h2 className="font-semibold">{resource ? 'Resource billing details' : 'What you are paying for'}</h2><p className="text-xs text-slate-500">{meta.total} billing groups · totals cover all pages</p></div><button className={control} disabled={!rows.length} onClick={exportPage}>Download this page (CSV)</button></div>
+        <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-3">Service / resource</th><th className="p-3">Billed SKU</th><th className="p-3">Licensing evidence</th>{resource && <th className="p-3">Usage / effective billed rate</th>}<th className="p-3 text-right">Charge</th></tr></thead><tbody>{rows.map((r, i) => <tr className="border-b border-slate-100 dark:border-slate-700" key={`${r.resource_id}-${r.sku_name}-${r.unit}-${r.currency}-${i}`}>
+          <td className="max-w-xs p-3"><small className="block text-slate-500">{r.service}</small>{!resource && r.resource_id ? <button className="break-all text-left font-medium text-cyan-700 hover:underline" onClick={() => { setResource({ id: r.resource_id, name: r.resource_name }); setService(r.service === 'Not supplied by OCI' ? '' : r.service); setOffset(0); }}>{r.resource_name} →</button> : <span className="break-all">{r.resource_name}</span>}<small className="mt-1 block text-slate-500">{r.region || 'Region not supplied'} · {r.compartment_id || 'Compartment not supplied'}</small></td>
+          <td className="max-w-sm p-3">{r.sku_name}<small className="mt-1 block text-slate-500">{r.sku_part_number || 'Open resource for part number'}</small></td><td className="max-w-xs p-3"><b>{r.licensing.model}</b><small className="mt-1 block text-slate-500">{r.licensing.explanation}</small></td>
+          {resource && <td className="p-3">{r.quantity == null ? 'Usage not supplied' : `${r.quantity.toLocaleString()} ${r.unit || ''}`}<small className="mt-1 block text-slate-500">{r.effective_unit_cost == null ? 'Rate unavailable' : `${r.effective_unit_cost.toPrecision(6)} ${r.currency} / ${r.unit}`}</small></td>}
+          <td className={`whitespace-nowrap p-3 text-right font-semibold ${r.cost < 0 ? 'text-emerald-700' : ''}`}>{money(r.cost, r.currency)}<small className="mt-1 block font-normal text-slate-500">{r.charge_type}</small></td></tr>)}</tbody></table></div>
+        {!rows.length && <p className="py-8 text-center text-slate-500">OCI returned no billing items. Missing charges do not confirm free resources or BYOL eligibility.</p>}
+        <div className="mt-4 flex items-center justify-between text-xs text-slate-500"><span>{rows.length ? `${offset + 1}–${offset + rows.length}` : '0'} of {meta.total}</span><div className="flex gap-2"><button className={control} disabled={!offset} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous</button><button className={control} disabled={!meta.has_more} onClick={() => setOffset(offset + 100)}>Next</button></div></div>
+      </section>
+    </>}
+    <details className={card}><summary className="cursor-pointer font-semibold">Understand PAYG, software licenses and your invoice</summary><div className="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-400">
+      <p><b>Pay as you go (PAYG)</b> is a commercial billing plan based on usage. This view uses OCI-reported charges; subscription discounts and agreements can affect the bill. It does not assume your tenancy uses PAYG.</p>
+      <p><b>Windows / SQL Server:</b> compute, Windows OS and SQL Server or Marketplace software can be separate charges. A software-related SKU is labeled as a metered software charge; confirm PAYG terms in your agreement.</p>
+      <p><b>License Included:</b> explicitly named SKUs already include software licensing in that charge. Do not add a second license estimate.</p>
+      <p><b>BYOL:</b> use of existing licenses still incurs OCI infrastructure charges. Separate license/support costs are outside this view. Eligibility must be checked against the applicable agreement.</p>
+      <p>Dates are UTC billing boundaries. Recent usage can be delayed. Taxes, fees and invoice adjustments may differ. Currencies are kept separate and negative amounts remain credits/adjustments. Effective unit cost is a blended billed rate, not a public price or quote.</p>
+      <div className="flex flex-wrap gap-4"><a className="text-cyan-700 underline" href="https://docs.oracle.com/en-us/iaas/Content/Billing/Concepts/costanalysisoverview.htm" target="_blank" rel="noreferrer">Oracle Cost Analysis</a><a className="text-cyan-700 underline" href="https://docs.oracle.com/en-us/iaas/Content/Compute/References/microsoftlicensing.htm" target="_blank" rel="noreferrer">Microsoft licensing on OCI</a><a className="text-cyan-700 underline" href="https://docs.oracle.com/en-us/iaas/Content/Billing/Concepts/costusagereportsoverview.htm" target="_blank" rel="noreferrer">Invoice reconciliation</a></div>
+    </div></details>
+  </div>;
 }
-
-export default Costs;

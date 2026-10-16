@@ -48,6 +48,8 @@ class CostCalculatorService:
         group_by: Optional[List[str]] = None,
         compartment_id: Optional[str] = None,
         region: Optional[str] = None,
+        service: Optional[str] = None,
+        resource_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get usage summary from OCI Usage API.
 
@@ -76,9 +78,12 @@ class CostCalculatorService:
             time_usage_ended=end_date,
             granularity=granularity,
             query_type="COST",
-            group_by=group_by or ["service", "skuName"],
+            group_by=list(dict.fromkeys([*(group_by or ["service", "skuName"]), "currency"])),
             compartment_depth=6,
         )
+
+        if len(request_details.group_by) > 4:
+            raise ValueError("OCI supports at most four grouping dimensions, including currency")
 
         # Build dimension filters (region and/or compartment)
         filter_dims = []
@@ -90,6 +95,10 @@ class CostCalculatorService:
             filter_dims.append(
                 oci.usage_api.models.Dimension(key="region", value=region)
             )
+        if service:
+            filter_dims.append(oci.usage_api.models.Dimension(key="service", value=service))
+        if resource_id:
+            filter_dims.append(oci.usage_api.models.Dimension(key="resourceId", value=resource_id))
         if filter_dims:
             request_details.filter = oci.usage_api.models.Filter(
                 operator="AND",
@@ -125,17 +134,22 @@ class CostCalculatorService:
         items = []
         for item in response.data.items:
             # Get cost amount - try different attribute names
-            cost = 0
-            if hasattr(item, 'computed_amount') and item.computed_amount:
+            cost = None
+            if getattr(item, 'computed_amount', None) is not None:
                 cost = float(item.computed_amount)
-            elif hasattr(item, 'cost') and item.cost:
+            elif getattr(item, 'cost', None) is not None:
                 cost = float(item.cost)
             
+            if cost is None:
+                raise ValueError("OCI did not supply a computed cost amount")
             items.append({
                 "service": getattr(item, "service", None),
                 "sku_name": getattr(item, "sku_name", None),
                 "sku_part_number": getattr(item, "sku_part_number", None),
-                "quantity": float(getattr(item, "quantity", 0) or 0),
+                "quantity": (
+                    float(item.computed_quantity) if getattr(item, "computed_quantity", None) is not None
+                    else None
+                ) if "unit" in request_details.group_by else None,
                 "unit": getattr(item, "unit", None),
                 "computed_amount": cost,
                 "currency": getattr(item, "currency", "USD"),
@@ -162,7 +176,7 @@ class CostCalculatorService:
         server-side via a dimension filter (no separate resource lookup needed).
         """
         region_key = region if (region and region != "all") else None
-        cache_key = f"costs_by_service_{start_date.date()}_{end_date.date()}_{region_key or 'all'}"
+        cache_key = f"costs_by_service_{start_date.isoformat()}_{end_date.isoformat()}_{region_key or 'all'}_{sorted(services or [])}"
         cached = get_cached(cache_key)
         if cached is not None:
             return cached
@@ -273,7 +287,7 @@ class CostCalculatorService:
         filter server-side.
         """
         region_key = region if (region and region != "all") else None
-        group_by = ["resourceId", "skuName"] if include_skus else ["resourceId"]
+        group_by = ["resourceId", "skuName", "unit"] if include_skus else ["resourceId"]
         items = self.get_usage_summary(
             start_date=start_date,
             end_date=end_date,

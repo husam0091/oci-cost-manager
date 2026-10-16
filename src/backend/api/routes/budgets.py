@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
+import hashlib
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
@@ -177,7 +179,15 @@ async def budget_status(
 ):
     ensure_budget_tables(db)
     principal = resolve_principal(db, token, strict=False)
-    cache_key = "budgets_status_v1"
+    # Never share an already-filtered response across principals or changed scopes.
+    scope = {
+        "username": principal.username, "role": principal.role,
+        "teams": sorted(principal.allowed_teams), "apps": sorted(principal.allowed_apps),
+        "envs": sorted(principal.allowed_envs), "compartments": sorted(principal.allowed_compartment_ids),
+        "day": datetime.now(UTC).date().isoformat(),
+    }
+    scope_hash = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
+    cache_key = f"budgets_status_v2_{scope_hash}"
     cached = get_cached(cache_key)
     if cached is not None:
         return BudgetStatusResponseModel(**cached)
