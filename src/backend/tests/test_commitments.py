@@ -554,3 +554,20 @@ def test_migration_upgrade_is_idempotent_and_creates_tables():
             == "uq_subscription_period"
         )
     engine.dispose()
+
+
+def test_contract_renewals_do_not_reuse_previous_term_periods():
+    raw = dict(
+        id="same-subscription",
+        source="oci:onesubscription",
+        currency_code="USD",
+        total_value="12000",
+        time_start="2026-03-15",
+        time_end="2027-03-15",
+    )
+    first = normalize(raw, datetime.now(UTC))
+    renewed = normalize(
+        {**raw, "time_start": "2027-03-15", "time_end": "2028-03-15"}, datetime.now(UTC)
+    )
+    assert first["id"] != renewed["id"]
+    assert first["term_months"] == renewed["term_months"] == 12

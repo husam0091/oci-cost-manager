@@ -112,7 +112,9 @@ def normalize(raw, now):
         if amount is not None and (not amount.is_finite() or amount < 0):
             amount = None
         return dict(
-            id=hashlib.sha256(f"{raw['source']}:{raw['id']}".encode()).hexdigest(),
+            id=hashlib.sha256(
+                f"{raw['source']}:{raw['id']}:{start.isoformat()}:{end.isoformat()}".encode()
+            ).hexdigest(),
             source=raw["source"],
             name=raw.get("service_name") or str(raw["id"]),
             status=raw.get("status") or raw.get("lifecycle_state") or "unknown",

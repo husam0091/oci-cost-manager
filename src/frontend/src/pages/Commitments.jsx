@@ -30,8 +30,10 @@ export default function Commitments({ activeRegion = 'all', role = 'viewer' }) {
     getCommitmentContracts().then(({ data }) => {
       if (cancelled) return;
       setContracts(data.data); setDiagnostics(data.meta.diagnostics);
-      setSelected(previous => data.data.some(c => c.id === previous) ? previous : data.data[0]?.id || '');
-      setCurrency(previous => data.data.some(c => c.currency === previous) ? previous : data.data[0]?.currency || '');
+      const today = new Date().toISOString().slice(0, 10);
+      const preferred = data.data.find(c => c.start_date <= today && c.end_date_exclusive > today && !['cancelled', 'canceled', 'terminated', 'expired'].includes(c.status.toLowerCase())) || data.data[0];
+      setSelected(previous => data.data.some(c => c.id === previous) ? previous : preferred?.id || '');
+      setCurrency(previous => data.data.some(c => c.currency === previous) ? previous : preferred?.currency || '');
     }).catch(e => { if (!cancelled) setError(String(errorText(e))); });
     return () => { cancelled = true; };
   }, [refresh]);

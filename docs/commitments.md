@@ -20,7 +20,7 @@ Each operation has an independent status, row count, HTTP status/error code and 
 
 A OneSubscription parent may have no monetary total. Explicit `subscribed_services[].total_value` values are additive only when **every** service has the same start/end dates as the parent. Otherwise the amount remains unavailable. Commitment quantities, installment schedules and current remaining balances are evidence, not assumed annual values. Organizations metadata can be successful even when it does not contain enough contract data to build a dated monetary comparison.
 
-Raw source evidence is retained in the contract record, not returned in chart payloads. Monetary contracts retain source and computed timestamp. Overlapping contracts remain separate: selecting two overlapping agreements is not permission to add their allowances or duplicate tenancy consumption.
+Raw source evidence is retained in the contract record, not returned in chart payloads. Monetary contracts retain source and computed timestamp. Renewals use distinct source/identifier/start/end keys, preserving historical periods. Overlapping contracts remain separate: selecting two overlapping agreements is not permission to add their allowances or duplicate tenancy consumption.
 
 ## IAM checklist
 
