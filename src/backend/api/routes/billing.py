@@ -52,7 +52,7 @@ async def spend(
         sorted(principal.allowed_compartment_ids),
     ]
     key = (
-        "billing_spend_v1_"
+        "billing_spend_v2_"
         + hashlib.sha256(
             json.dumps(
                 [

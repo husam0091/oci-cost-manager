@@ -1,23 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  Database,
-  DollarSign,
-  PiggyBank,
-  Settings as SettingsIcon,
-  FileSpreadsheet,
-  Menu,
-  X,
-  ShieldCheck,
-  UserCog,
-  Wrench,
-  Sparkles,
-  ScrollText,
-  Sun,
-  Moon,
-} from 'lucide-react';
+import { LayoutDashboard, Database, DollarSign, PiggyBank, Settings as SettingsIcon, FileSpreadsheet, Menu, X, ShieldCheck, ChevronRight, Layers3, Wrench, Sparkles, ScrollText, Sun, Moon } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
+import Overview from './pages/Overview';
+import { BUILD_INFO } from './buildInfo';
 import Resources from './pages/Resources';
 import Costs from './pages/Costs';
 import Budget from './pages/Budget';
@@ -30,109 +16,87 @@ import Actions from './pages/Actions';
 import Logs from './pages/Logs';
 import GlobalStatusBar from './components/GlobalStatusBar';
 import { getMe, adminGetRegions } from './services/api';
-
 const PERSONA_ORDER = {
   Executive: ['/', '/budget', '/exports', '/costs', '/recommendations', '/governance', '/resources', '/actions', '/logs', '/settings'],
   FinOps: ['/costs', '/budget', '/exports', '/governance', '/logs', '/', '/recommendations', '/resources', '/actions', '/settings'],
-  Engineer: ['/resources', '/recommendations', '/actions', '/costs', '/governance', '/budget', '/exports', '/', '/logs', '/settings'],
+  Engineer: ['/resources', '/recommendations', '/actions', '/costs', '/governance', '/budget', '/exports', '/', '/logs', '/settings']
 };
-
-const navItems = [
-  { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/resources', icon: Database, label: 'Resources' },
-  { path: '/costs', icon: DollarSign, label: 'Costs' },
-  { path: '/budget', icon: PiggyBank, label: 'Budget' },
-  { path: '/exports', icon: FileSpreadsheet, label: 'Export Reports' },
-  { path: '/governance', icon: ShieldCheck, label: 'Governance' },
-  { path: '/recommendations', icon: Sparkles, label: 'Recommendations' },
-  { path: '/actions', icon: Wrench, label: 'Actions' },
-  { path: '/logs', icon: ScrollText, label: 'Logs & Diagnostics' },
-  { path: '/settings', icon: SettingsIcon, label: 'Settings & Profile' },
-];
-
-function Sidebar({ mobileOpen, onClose, profileName, persona }) {
+const navItems = [{
+  path: '/',
+  icon: LayoutDashboard,
+  label: 'Overview'
+}, {
+  path: '/resources',
+  icon: Database,
+  label: 'Resources'
+}, {
+  path: '/costs',
+  icon: DollarSign,
+  label: 'Spend explorer'
+}, {
+  path: '/budget',
+  icon: PiggyBank,
+  label: 'Budgets'
+}, {
+  path: '/exports',
+  icon: FileSpreadsheet,
+  label: 'Reports'
+}, {
+  path: '/governance',
+  icon: ShieldCheck,
+  label: 'Governance'
+}, {
+  path: '/recommendations',
+  icon: Sparkles,
+  label: 'Recommendations'
+}, {
+  path: '/actions',
+  icon: Wrench,
+  label: 'Actions'
+}, {
+  path: '/logs',
+  icon: ScrollText,
+  label: 'Diagnostics'
+}, {
+  path: '/settings',
+  icon: SettingsIcon,
+  label: 'Settings'
+}];
+function Sidebar({
+  mobileOpen,
+  onClose,
+  profileName,
+  persona
+}) {
   const location = useLocation();
-  const sortedItems = [...navItems].sort(
-    (a, b) => PERSONA_ORDER[persona].indexOf(a.path) - PERSONA_ORDER[persona].indexOf(b.path),
-  );
-
-  return (
-    <>
-      <div
-        className={`fixed inset-0 z-30 bg-slate-950/45 backdrop-blur-sm transition-opacity lg:hidden ${
-          mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
-        }`}
-        onClick={onClose}
-      />
-      <aside
-        className={`sidebar-surface fixed left-0 top-0 z-40 h-full w-[300px] transform border-r border-white/20 p-5 text-slate-100 shadow-2xl shadow-slate-950/30 backdrop-blur-xl transition-transform duration-200 ease-out lg:static lg:z-10 lg:h-auto lg:min-h-full lg:w-80 lg:translate-x-0 lg:self-stretch ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
-      >
-        <div className="mb-8 flex items-start justify-between">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">OCI Cost Manager</h1>
-            <p className="mt-1 text-sm text-slate-400">Cost intelligence console</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-2 text-slate-300 hover:bg-slate-800 lg:hidden"
-            aria-label="Close navigation"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="mb-5 rounded-xl border border-cyan-300/25 bg-cyan-300/15 px-3 py-2 text-xs text-cyan-100">
-          Live cost control with integration diagnostics
-        </div>
-
-        <nav className="space-y-1">
-          {sortedItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={onClose}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
-                  isActive
-                    ? 'bg-cyan-300 text-slate-950 shadow-[0_8px_22px_rgba(34,211,238,0.35)]'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                }`}
-              >
-                <Icon size={18} />
-                <span className="font-medium">{item.label}</span>
-              </Link>
-            );
-          })}
+  const sortedItems = [...navItems].sort((a, b) => PERSONA_ORDER[persona].indexOf(a.path) - PERSONA_ORDER[persona].indexOf(b.path));
+  return <>
+      <div className={`fixed inset-0 z-30 bg-slate-950/45 backdrop-blur-sm transition-opacity lg:hidden ${mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'}`} onClick={onClose} />
+      <aside className={`workspace-sidebar ${mobileOpen ? 'is-open' : ''}`}>
+        <Link className="workspace-brand" to="/" onClick={onClose}>
+          <span className="workspace-logo"><Layers3 size={23} /></span>
+          <span>OCI Cost Manager<small>FINOPS WORKSPACE</small></span>
+        </Link>
+        <button className="sidebar-close lg:hidden" onClick={onClose} aria-label="Close navigation"><X size={18} /></button>
+        <p className="workspace-nav-label">WORKSPACE</p>
+        <nav aria-label="Main navigation" className="workspace-navigation">
+          {sortedItems.map(item => {
+          const Icon = item.icon;
+          const isActive = location.pathname === item.path;
+          return <Link key={item.path} to={item.path} onClick={onClose} aria-current={isActive ? 'page' : undefined} className={isActive ? 'is-active' : ''}>
+              <Icon size={18} /><span>{item.label}</span>{isActive && <ChevronRight size={14} className="nav-chevron" />}
+            </Link>;
+        })}
         </nav>
-
-        <div className="mt-8 rounded-xl border border-white/10 bg-slate-950/35 p-3">
-          <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
-            <ShieldCheck size={14} />
-            Session
-          </div>
-          <div className="flex items-center justify-between rounded-lg bg-slate-800/70 px-3 py-2 text-sm">
-            <span className="text-slate-300">Profile</span>
-            <span className="font-medium text-slate-100">{profileName || 'admin'}</span>
-          </div>
-          <Link
-            to="/settings"
-            onClick={onClose}
-            className="mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-cyan-300 transition hover:bg-slate-800 hover:text-cyan-200"
-          >
-            <UserCog size={16} />
-            Setup Profile
-          </Link>
+        <div className="sidebar-guidance"><ShieldCheck size={17} /><div>Clarity before action<small>Review billed usage and licensing before changing a workload.</small></div></div>
+        <div className="workspace-session">
+          <span className="workspace-avatar">{(profileName || 'U').slice(0, 2).toUpperCase()}</span>
+          <Link to="/settings" onClick={onClose}><strong>{profileName || 'User'}</strong><small>Profile & preferences</small></Link>
         </div>
+        <span className="sidebar-release">Interface {BUILD_INFO.uiVersion}</span>
       </aside>
-    </>
-  );
+    </>;
 }
-
 function AppLayout() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -140,14 +104,16 @@ function AppLayout() {
   const [authenticated, setAuthenticated] = useState(false);
   const [profileName, setProfileName] = useState('admin');
   const [role, setRole] = useState('admin');
-  const [persona, setPersona] = useState(localStorage.getItem('ui_persona') || 'Executive');
+  const [persona, setPersona] = useState(() => {
+    const saved = localStorage.getItem('ui_persona');
+    return PERSONA_ORDER[saved] ? saved : 'Executive';
+  });
   const [appVersion, setAppVersion] = useState('1.0.0');
   const [demoMode, setDemoMode] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [activeRegion, setActiveRegion] = useState(localStorage.getItem('ui_active_region') || 'all');
   const [availableRegions, setAvailableRegions] = useState([]);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('ui_dark_mode') === 'true');
-
   useEffect(() => {
     let mounted = true;
     const checkAuth = async () => {
@@ -163,11 +129,14 @@ function AppLayout() {
           try {
             const regRes = await adminGetRegions();
             if (regRes.data?.success) {
-              const { primary_region, enabled_regions } = regRes.data.data;
+              const {
+                primary_region,
+                enabled_regions
+              } = regRes.data.data;
               const all = [...new Set([primary_region, ...(enabled_regions || [])].filter(Boolean))];
               setAvailableRegions(all);
             }
-          } catch { /* regions endpoint requires admin — ignore for non-admin */ }
+          } catch {/* regions endpoint requires admin — ignore for non-admin */}
         } else {
           setAuthenticated(false);
         }
@@ -182,7 +151,6 @@ function AppLayout() {
       mounted = false;
     };
   }, []);
-
   useEffect(() => {
     const root = document.documentElement;
     if (darkMode) {
@@ -192,128 +160,98 @@ function AppLayout() {
     }
     localStorage.setItem('ui_dark_mode', String(darkMode));
   }, [darkMode]);
-
   useEffect(() => {
-    const onApiError = (evt) => {
+    const onApiError = evt => {
       const detail = evt?.detail || {};
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      setToasts((prev) => [...prev, { id, ...detail }].slice(-4));
+      setToasts(prev => [...prev, {
+        id,
+        ...detail
+      }].slice(-4));
       setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== id));
+        setToasts(prev => prev.filter(t => t.id !== id));
       }, 7000);
     };
     window.addEventListener('app:api-error', onApiError);
     return () => window.removeEventListener('app:api-error', onApiError);
   }, []);
-
   const pageTitle = useMemo(() => {
-    const match = navItems.find((item) => item.path === location.pathname);
-    return match ? match.label : 'OCI Cost Manager';
+    const match = navItems.find(item => item.path === location.pathname);
+    return match ? match.label : location.pathname === '/analytics' ? 'Detailed analytics' : 'OCI Cost Manager';
   }, [location.pathname]);
-
   if (authChecking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-app-gradient">
+    return <div className="flex min-h-screen items-center justify-center bg-app-gradient">
         <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-sky-600" />
-      </div>
-    );
+      </div>;
   }
-
   if (!authenticated) {
-    return (
-      <div className="min-h-screen bg-app-gradient p-4 lg:p-8">
-        <Settings onAuthChange={(value, username) => {
+    return <div className="finops-app workspace-login">
+      <section className="login-introduction">
+        <div className="workspace-brand"><span className="workspace-logo"><Layers3 size={23} /></span><span>OCI Cost Manager<small>FINOPS WORKSPACE</small></span></div>
+        <div><p className="overline">CLOUD COST INTELLIGENCE</p><h1>A clearer view<br />of your cloud.</h1><p>Understand every charge. Connect spend to workloads. Make informed decisions.</p></div>
+        <span className="login-release">Interface {BUILD_INFO.uiVersion} · Build {BUILD_INFO.revision.slice(0, 8)}</span>
+      </section>
+      <section className="login-form-area"><Settings onAuthChange={(value, username) => {
           setAuthenticated(value);
           if (username) setProfileName(username);
-        }} forceLogin />
-      </div>
-    );
+        }} forceLogin /><p className="login-footnote">Use your existing workspace account. Access follows your assigned role and scope.</p></section>
+    </div>;
   }
-
-  return (
-    <div className="min-h-screen bg-app-gradient text-slate-900 dark:text-slate-100">
-      <div className="mx-auto flex min-h-screen max-w-[1800px]">
+  return <div className="finops-app text-slate-900 dark:text-slate-100">
+      <a className="skip-link" href="#main-content">Skip to content</a>
+      <div className="workspace-layout">
         <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} profileName={profileName} persona={persona} />
-        <main className="w-full flex-1">
+        <main className="workspace-main" id="main-content">
           <div className="fixed right-4 top-4 z-50 space-y-2">
-            {toasts.map((t) => (
-              <div key={t.id} className="max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 shadow dark:border-rose-700 dark:bg-rose-950 dark:text-rose-200">
+            {toasts.map(t => <div key={t.id} className="max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 shadow dark:border-rose-700 dark:bg-rose-950 dark:text-rose-200">
                 <div className="font-medium">{t.code || 'API_ERROR'}</div>
                 <div>{t.message || 'Request failed'}</div>
                 {t.correlation_id ? <div className="mt-1 text-xs text-rose-700 dark:text-rose-400">Correlation: {t.correlation_id}</div> : null}
-              </div>
-            ))}
+              </div>)}
           </div>
-          <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-slate-700/70 dark:bg-slate-900/92 lg:px-8">
+          <header className="workspace-header">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  className="rounded-md border border-slate-300 bg-white p-2 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 lg:hidden"
-                  onClick={() => setMobileOpen(true)}
-                  aria-label="Open navigation"
-                >
+                <button type="button" className="rounded-md border border-slate-300 bg-white p-2 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open navigation">
                   <Menu size={18} />
                 </button>
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Workspace</p>
-                  <h2 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">{pageTitle}</h2>
+                  <div className="workspace-breadcrumb"><span>Workspace</span><ChevronRight size={13} /><strong>{pageTitle}</strong></div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {availableRegions.length > 0 && (
-                  <select
-                    value={activeRegion}
-                    onChange={(e) => {
-                      setActiveRegion(e.target.value);
-                      localStorage.setItem('ui_active_region', e.target.value);
-                    }}
-                    className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs font-medium text-sky-700 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-300"
-                  >
+                {availableRegions.length > 0 && <select aria-label="Active OCI region" value={activeRegion} onChange={e => {
+                setActiveRegion(e.target.value);
+                localStorage.setItem('ui_active_region', e.target.value);
+              }} className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs font-medium text-sky-700 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-300">
                     <option value="all">All Regions</option>
-                    {availableRegions.map((r) => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                )}
-                <select
-                  value={persona}
-                  onChange={(e) => {
-                    setPersona(e.target.value);
-                    localStorage.setItem('ui_persona', e.target.value);
-                  }}
-                  className="hidden rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 sm:block"
-                >
+                    {availableRegions.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>}
+                <select aria-label="Workspace view" value={persona} onChange={e => {
+                setPersona(e.target.value);
+                localStorage.setItem('ui_persona', e.target.value);
+              }} className="hidden rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 sm:block">
                   <option>Executive</option>
                   <option>FinOps</option>
                   <option>Engineer</option>
                 </select>
-                <div className="hidden rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-medium text-cyan-700 dark:border-cyan-700 dark:bg-cyan-950 dark:text-cyan-300 sm:block">
-                  Role: {role}
-                </div>
-                {demoMode ? (
-                  <div className="hidden rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300 sm:block">
+                <span className="workspace-role hidden sm:inline-flex">{role}</span>
+                {demoMode ? <div className="hidden rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300 sm:block">
                     Demo mode: read-only
-                  </div>
-                ) : null}
+                  </div> : null}
                 {/* Dark / Light mode toggle */}
-                <button
-                  type="button"
-                  onClick={() => setDarkMode((v) => !v)}
-                  title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-                  className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                  aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-                >
+                <button type="button" onClick={() => setDarkMode(v => !v)} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
                   {darkMode ? <Sun size={15} /> : <Moon size={15} />}
                 </button>
               </div>
             </div>
           </header>
 
-          <section className="p-4 dark:bg-slate-950/50 lg:p-8">
+          <section className="workspace-content">
             <GlobalStatusBar />
             <Routes>
-              <Route path="/" element={<Dashboard persona={persona} activeRegion={activeRegion} />} />
+              <Route path="/" element={<Overview activeRegion={activeRegion} />} />
+              <Route path="/analytics" element={<Dashboard persona={persona} activeRegion={activeRegion} />} />
               <Route path="/resources" element={<Resources activeRegion={activeRegion} />} />
               <Route path="/costs" element={<Costs activeRegion={activeRegion} />} />
               <Route path="/budget" element={<Budget activeRegion={activeRegion} />} />
@@ -322,35 +260,23 @@ function AppLayout() {
               <Route path="/recommendations" element={<Recommendations activeRegion={activeRegion} />} />
               <Route path="/actions" element={<Actions activeRegion={activeRegion} />} />
               <Route path="/logs" element={<Logs role={role} activeRegion={activeRegion} />} />
-              <Route
-                path="/settings"
-                element={
-                  <Settings
-                    onAuthChange={(value, username) => {
-                      setAuthenticated(value);
-                      if (username) setProfileName(username);
-                    }}
-                    onRegionsChange={(regions) => setAvailableRegions(regions)}
-                  />
-                }
-              />
+              <Route path="/settings" element={<Settings onAuthChange={(value, username) => {
+              setAuthenticated(value);
+              if (username) setProfileName(username);
+            }} onRegionsChange={regions => setAvailableRegions(regions)} />} />
             </Routes>
           </section>
-          <footer className="border-t border-slate-200/70 bg-white/70 px-4 py-2 text-right text-xs text-slate-600 dark:border-slate-700/70 dark:bg-slate-900/70 dark:text-slate-400 lg:px-8">
-            OCI Cost Manager v{appVersion}
+          <footer className="workspace-footer">
+            <span>OCI Cost Manager <span className="release-badge">Interface {BUILD_INFO.uiVersion}</span></span>
+            <span title={`Built ${BUILD_INFO.builtAt}`}>Build {BUILD_INFO.revision.slice(0, 8)} · API v{appVersion}</span>
           </footer>
         </main>
       </div>
-    </div>
-  );
+    </div>;
 }
-
 function App() {
-  return (
-    <Router>
+  return <Router>
       <AppLayout />
-    </Router>
-  );
+    </Router>;
 }
-
 export default App;

@@ -36,7 +36,13 @@ server {
         proxy_set_header   X-Forwarded-Proto https;
     }
 
+    location /assets/ {
+        expires 1y;
+        try_files $uri =404;
+    }
+
     location / {
+        expires -1;
         try_files $uri /index.html;
     }
 }
