@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Database, DollarSign, PiggyBank, Settings as SettingsIcon, FileSpreadsheet, Menu, X, ShieldCheck, ChevronRight, Layers3, Wrench, Sparkles, ScrollText, Sun, Moon } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import Overview from './pages/Overview';
+const Commitments = lazy(() => import('./pages/Commitments'));
 import { BUILD_INFO } from './buildInfo';
 import Resources from './pages/Resources';
 import Costs from './pages/Costs';
@@ -17,9 +18,9 @@ import Logs from './pages/Logs';
 import GlobalStatusBar from './components/GlobalStatusBar';
 import { getMe, adminGetRegions } from './services/api';
 const PERSONA_ORDER = {
-  Executive: ['/', '/budget', '/exports', '/costs', '/recommendations', '/governance', '/resources', '/actions', '/logs', '/settings'],
-  FinOps: ['/costs', '/budget', '/exports', '/governance', '/logs', '/', '/recommendations', '/resources', '/actions', '/settings'],
-  Engineer: ['/resources', '/recommendations', '/actions', '/costs', '/governance', '/budget', '/exports', '/', '/logs', '/settings']
+  Executive: ['/', '/commitments', '/budget', '/exports', '/costs', '/recommendations', '/governance', '/resources', '/actions', '/logs', '/settings'],
+  FinOps: ['/costs', '/commitments', '/budget', '/exports', '/governance', '/logs', '/', '/recommendations', '/resources', '/actions', '/settings'],
+  Engineer: ['/resources', '/commitments', '/recommendations', '/actions', '/costs', '/governance', '/budget', '/exports', '/', '/logs', '/settings']
 };
 const navItems = [{
   path: '/',
@@ -33,6 +34,10 @@ const navItems = [{
   path: '/costs',
   icon: DollarSign,
   label: 'Spend explorer'
+}, {
+  path: '/commitments',
+  icon: PiggyBank,
+  label: 'Commitments'
 }, {
   path: '/budget',
   icon: PiggyBank,
@@ -66,10 +71,11 @@ function Sidebar({
   mobileOpen,
   onClose,
   profileName,
-  persona
+  persona,
+  commitmentsEnabled = true
 }) {
   const location = useLocation();
-  const sortedItems = [...navItems].sort((a, b) => PERSONA_ORDER[persona].indexOf(a.path) - PERSONA_ORDER[persona].indexOf(b.path));
+  const sortedItems = navItems.filter(item => item.path !== '/commitments' || commitmentsEnabled).sort((a, b) => PERSONA_ORDER[persona].indexOf(a.path) - PERSONA_ORDER[persona].indexOf(b.path));
   return <>
       <div className={`fixed inset-0 z-30 bg-slate-950/45 backdrop-blur-sm transition-opacity lg:hidden ${mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'}`} onClick={onClose} />
       <aside className={`workspace-sidebar ${mobileOpen ? 'is-open' : ''}`}>
@@ -110,6 +116,7 @@ function AppLayout() {
   });
   const [appVersion, setAppVersion] = useState('1.0.0');
   const [demoMode, setDemoMode] = useState(false);
+  const [commitmentsEnabled, setCommitmentsEnabled] = useState(true);
   const [toasts, setToasts] = useState([]);
   const [activeRegion, setActiveRegion] = useState(localStorage.getItem('ui_active_region') || 'all');
   const [availableRegions, setAvailableRegions] = useState([]);
@@ -125,6 +132,7 @@ function AppLayout() {
           setProfileName(me.data?.data?.username || 'user');
           setRole(me.data?.data?.role || 'viewer');
           setAppVersion(me.data?.data?.app_version || '1.0.0');
+          setCommitmentsEnabled(me.data?.data?.feature_flags?.commitments_enabled !== false);
           setDemoMode(parseBooleanFlag(me.data?.data?.feature_flags?.enable_demo_mode));
           try {
             const regRes = await adminGetRegions();
@@ -200,7 +208,7 @@ function AppLayout() {
   return <div className="finops-app text-slate-900 dark:text-slate-100">
       <a className="skip-link" href="#main-content">Skip to content</a>
       <div className="workspace-layout">
-        <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} profileName={profileName} persona={persona} />
+        <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} profileName={profileName} persona={persona} commitmentsEnabled={commitmentsEnabled} />
         <main className="workspace-main" id="main-content">
           <div className="fixed right-4 top-4 z-50 space-y-2">
             {toasts.map(t => <div key={t.id} className="max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 shadow dark:border-rose-700 dark:bg-rose-950 dark:text-rose-200">
@@ -251,6 +259,7 @@ function AppLayout() {
             <GlobalStatusBar />
             <Routes>
               <Route path="/" element={<Overview activeRegion={activeRegion} />} />
+              <Route path="/commitments" element={<Suspense fallback={<p>Loading Commitments…</p>}><Commitments activeRegion={activeRegion} role={role} /></Suspense>} />
               <Route path="/analytics" element={<Dashboard persona={persona} activeRegion={activeRegion} />} />
               <Route path="/resources" element={<Resources activeRegion={activeRegion} />} />
               <Route path="/costs" element={<Costs activeRegion={activeRegion} />} />

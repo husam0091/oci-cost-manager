@@ -216,161 +216,16 @@ function Toggle({ options, value, onChange }) {
 const MANUAL_COMMIT_KEY = 'oci_manual_commitment';
 
 function UniversalCreditsPanel({ data }) {
-  const [manualInput, setManualInput] = useState(
-    () => localStorage.getItem(MANUAL_COMMIT_KEY) || ''
-  );
-  const [editMode, setEditMode] = useState(false);
-  const [draft, setDraft] = useState(manualInput);
-
+  const [manualInput, setManualInput] = useState(() => localStorage.getItem(MANUAL_COMMIT_KEY) || '');
   if (!data) return null;
-  const {
-    total_consumed_ytd, total_consumed_mtd,
-    year_start, as_of,
-    subscription_api_available, subscriptions,
-  } = data;
-
-  // Use API value if available, else fall back to manually entered value
-  const apiCommitted = Number(data.total_committed || 0);
-  const manualCommitted = Number(manualInput || 0);
-  const total_committed = apiCommitted > 0 ? apiCommitted : manualCommitted;
-  const remaining = total_committed > 0 && total_consumed_ytd != null
-    ? round2(total_committed - total_consumed_ytd) : null;
-  const utilization_pct = total_committed > 0 && total_consumed_ytd != null
-    ? Math.min(round2(total_consumed_ytd / total_committed * 100), 100) : 0;
-
-  function round2(v) { return Math.round(v * 100) / 100; }
-  const pct = Number(utilization_pct || 0);
-  const barColor = pct >= 90 ? 'bg-rose-500' : pct >= 70 ? 'bg-amber-400' : 'bg-emerald-500';
-
-  const saveManual = () => {
-    localStorage.setItem(MANUAL_COMMIT_KEY, draft);
-    setManualInput(draft);
-    setEditMode(false);
-  };
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-slate-700">Universal Credits</h2>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
-          YTD {year_start} → {as_of}
-        </span>
-      </div>
-      {!subscription_api_available && data.subscription_error && (
-        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          <span className="font-medium">API diagnostic:</span> {data.subscription_error}
-        </div>
-      )}
-      {!subscription_api_available && (
-        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <p className="text-xs font-medium text-slate-700">Annual Commitment (manual)</p>
-              <p className="text-xs text-slate-400">Enter your OCI Universal Credit commitment to see utilization</p>
-            </div>
-            {!editMode ? (
-              <div className="flex items-center gap-2">
-                {manualCommitted > 0 && (
-                  <span className="text-sm font-bold text-slate-800">
-                    ${manualCommitted.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => { setDraft(manualInput); setEditMode(true); }}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100"
-                >
-                  {manualCommitted > 0 ? 'Edit' : 'Set Amount'}
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500">$</span>
-                <input
-                  type="number"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  className="w-32 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                  placeholder="e.g. 500000"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  onClick={saveManual}
-                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white"
-                >
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditMode(false)}
-                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-          <p className="text-xs text-slate-500">Committed (Annual)</p>
-          <p className="mt-1 text-lg font-bold text-slate-900">
-            {total_committed > 0 ? `$${Number(total_committed).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—'}
-          </p>
-        </div>
-        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-          <p className="text-xs text-slate-500">Consumed YTD</p>
-          <p className="mt-1 text-lg font-bold text-indigo-700">
-            {total_consumed_ytd != null ? `$${Number(total_consumed_ytd).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—'}
-          </p>
-        </div>
-        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-          <p className="text-xs text-slate-500">Consumed MTD</p>
-          <p className="mt-1 text-lg font-bold text-slate-800">
-            {total_consumed_mtd != null ? `$${Number(total_consumed_mtd).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—'}
-          </p>
-        </div>
-        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-          <p className="text-xs text-slate-500">Remaining</p>
-          <p className={`mt-1 text-lg font-bold ${remaining != null && remaining < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-            {remaining != null ? `$${Number(remaining).toLocaleString(undefined,{maximumFractionDigits:0})}` : '—'}
-          </p>
-        </div>
-      </div>
-      {total_committed > 0 && total_consumed_ytd != null && (
-        <div className="mt-4">
-          <div className="mb-1 flex justify-between text-xs text-slate-500">
-            <span>Credit utilization</span>
-            <span className="font-medium">{pct.toFixed(1)}%</span>
-          </div>
-          <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
-            <div className={`h-3 rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
-          </div>
-          <div className="mt-1 flex justify-between text-xs text-slate-400">
-            <span>$0</span>
-            <span>${Number(total_committed).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
-          </div>
-        </div>
-      )}
-      {subscription_api_available && subscriptions?.length > 0 && (
-        <div className="mt-3 space-y-1">
-          {subscriptions.map((s, i) => (
-            <div key={s.id || i} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-600">
-              <span className="rounded-full bg-indigo-100 px-2 py-0.5 font-medium text-indigo-700">{s.subscription_type || 'ANNUAL'}</span>
-              <span>{s.time_start?.slice(0,10)} → {s.time_end?.slice(0,10)}</span>
-              <span className="ml-auto font-medium">${Number(s.total_value || 0).toLocaleString(undefined,{maximumFractionDigits:0})} {s.currency}</span>
-              <span className={`rounded-full px-2 py-0.5 ${(s.status||'').toLowerCase()==='active'?'bg-emerald-100 text-emerald-700':'bg-slate-200 text-slate-500'}`}>{s.status||'—'}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return <section className="rounded-2xl border border-slate-200 bg-white p-5">
+    <div className="flex justify-between gap-3"><div><h3 className="font-semibold">Universal Credits</h3><p className="text-sm text-slate-500">Compare actual spend against subscription anniversary periods in Commitments.</p></div><Link to="/commitments" className="finops-button">Open Commitments</Link></div>
+    <div className="mt-4 grid gap-3 md:grid-cols-3">{(data.totals_by_currency || []).map(row => <div key={row.currency}><strong>{row.currency}</strong><p>Consumed YTD: {Number(row.ytd).toLocaleString()}</p><p>Consumed MTD: {Number(row.mtd).toLocaleString()}</p></div>)}</div>
+    <label className="mt-4 block text-sm">Legacy manual annual amount · USD · this browser only<input className="ml-3 rounded border p-2" type="number" min="0" value={manualInput} onChange={e => { setManualInput(e.target.value); localStorage.setItem(MANUAL_COMMIT_KEY, e.target.value); }} /></label>
+    <p className="mt-2 text-xs text-slate-500">Manual reference only. It is not combined with OCI contract values or used to infer term utilisation. Add dated manual terms on the Commitments page for a valid comparison.</p>
+  </section>;
 }
 
-// ─── Daily Cost Chart ────────────────────────────────────────────────────────
 function DailyCostChart({ data }) {
   if (!data?.days?.length) {
     return (

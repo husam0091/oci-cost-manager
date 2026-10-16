@@ -111,6 +111,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
     enable_oci_executors: false,
     enable_destructive_actions: false,
     enable_budget_auto_eval: true,
+    commitments_enabled: true,
     enable_demo_mode: false,
   });
 
@@ -342,6 +343,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
       enable_oci_executors: featureFlags.enable_oci_executors,
       enable_destructive_actions: featureFlags.enable_destructive_actions,
       enable_budget_auto_eval: featureFlags.enable_budget_auto_eval,
+      commitments_enabled: featureFlags.commitments_enabled,
       enable_demo_mode: featureFlags.enable_demo_mode,
     });
 
@@ -718,6 +720,7 @@ function Settings({ onAuthChange, forceLogin = false, onRegionsChange }) {
                   />
                   enable_budget_auto_eval
                 </label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={featureFlags.commitments_enabled !== false} onChange={e => setFeatureFlags(f => ({ ...f, commitments_enabled: e.target.checked }))} />commitments_enabled</label>
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"

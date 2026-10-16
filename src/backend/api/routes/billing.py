@@ -1,11 +1,13 @@
 """Authenticated, auditable drill-down of actual OCI Usage API charges."""
 
+import logging
+import uuid
 import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from api.utils.dates import parse_required_range
@@ -18,10 +20,12 @@ from services.allocation import evaluate_allocation, load_enabled_rules
 from services.spend_explorer import explain_spend
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/spend")
 def spend(
+    request: Request,
     start_date: str = Query(...),
     end_date: str = Query(...),
     region: Optional[str] = Query(None),
@@ -87,11 +91,16 @@ def spend(
                 service=service,
                 resource_id=resource_id,
             )
-        except Exception:
+        except Exception as exc:
+            correlation_id = getattr(request.state, "correlation_id", None) or str(uuid.uuid4())
+            logger.exception("billing_usage_failed correlation_id=%s", correlation_id)
+            parse_error = isinstance(exc, (ValueError, TypeError))
             raise HTTPException(
-                status_code=503,
-                detail="OCI billing is unavailable. Check Diagnostics and retry; no estimated data was substituted.",
-            )
+                status_code=502 if parse_error else 503,
+                detail={"code": "OCI_BILLING_PARSE_ERROR" if parse_error else "OCI_BILLING_UNAVAILABLE",
+                        "reason": "OCI returned billing data that could not be parsed; no estimated data was substituted." if parse_error else "OCI billing is unavailable. Check Diagnostics and retry; no estimated data was substituted.",
+                        "correlation_id": correlation_id},
+            ) from exc
         # Names/region are inventory enrichment, not inferred billing dimensions.
         resource_map = {r.ocid: r for r in db.query(Resource).all()}
         restricted = not principal.is_admin and any(

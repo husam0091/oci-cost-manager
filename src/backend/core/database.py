@@ -130,6 +130,8 @@ def _ensure_settings_schema() -> None:
             statements.append("ALTER TABLE settings ADD COLUMN enable_destructive_actions BOOLEAN DEFAULT 0")
         if "enable_budget_auto_eval" not in existing:
             statements.append("ALTER TABLE settings ADD COLUMN enable_budget_auto_eval BOOLEAN DEFAULT 1")
+        if "commitments_enabled" not in existing:
+            statements.append("ALTER TABLE settings ADD COLUMN commitments_enabled BOOLEAN DEFAULT TRUE")
         if "enable_demo_mode" not in existing:
             statements.append("ALTER TABLE settings ADD COLUMN enable_demo_mode BOOLEAN DEFAULT 0")
         if "portal_ssl_enabled" not in existing:

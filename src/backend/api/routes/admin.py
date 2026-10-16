@@ -384,6 +384,8 @@ def update_feature_flags(payload: dict[str, Any], db: Session = Depends(get_db),
         s.enable_destructive_actions = bool(payload.get("enable_destructive_actions"))
     if "enable_budget_auto_eval" in payload:
         s.enable_budget_auto_eval = bool(payload.get("enable_budget_auto_eval"))
+    if "commitments_enabled" in payload:
+        s.commitments_enabled = bool(payload.get("commitments_enabled"))
     if "enable_demo_mode" in payload:
         s.enable_demo_mode = bool(payload.get("enable_demo_mode"))
     db.commit()
